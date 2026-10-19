@@ -771,7 +771,7 @@ function renderCdf(b,m,ev){
     const slot=(p,x)=>{if(!p)return '<span class="pls none-pg"></span>';const k=x?(pu[x.id]||[]).length:0;return `<button class="pls ${x?'':'empty'} ${x&&k>b.maxReuse?'bad':''}" data-act="plpick" data-page="${p}" data-drop="pgl" ${x?'draggable="true" data-drag="pagelay"':''} title="${x?`${esc(x.name)} · ${plPhotos(x)} photo(s) · ${k}/${b.maxReuse} · clic : changer · glisser sur une autre page : échanger`:`Page ${p} : choisir une mise en page`}">${x?(x.img?`<img src="${esc(imgSrc(x.img))}" alt="">`:esc(x.name.slice(0,3))):'+'}</button>`};
     return `<article class="spread ${dim?'dim':''} ${(l&&n>b.maxReuse)||overPL?'over-limit':''}" data-key="${s.key}" data-drop="spread">
       ${s.key>=2?`<button class="ins" data-act="ins-pl" data-key="${s.key}" title="Insérer une planche vide avant la planche ${plancheNo(s.key)}" aria-label="Insérer une planche avant la planche ${plancheNo(s.key)}">+</button>`:''}
-      <div class="sp-top"><span class="sp-label" data-drop="plmove" data-pl="${plancheNo(s.key)}" title="Déposez ici un événement pour le déplacer sur cette planche">Pl. ${plancheNo(s.key)}</span><input class="spname" id="spn-${s.key}" data-act="spread-name" data-key="${s.key}" value="${esc(b.spreadNames[s.key]||'')}" placeholder="Nommer la planche" aria-label="Nom de la planche ${plancheNo(s.key)}">${(()=>{const pk=s.key===0?null:s.key===2?0:s.key-2;const pn=pk!=null&&b.spreadNames[pk];return pn&&pn!==b.spreadNames[s.key]?`<button class="spprev" data-act="sp-prev" data-key="${s.key}" title="Reprendre le nom de la planche précédente : « ${esc(pn)} »">↶ ${esc(pn.length>14?pn.slice(0,13)+'…':pn)}</button>`:''})()}<button class="pin ${pinned?'on':''}" data-act="pin" data-key="${s.key}" title="${pinned?'Planche verrouillée : la répartition automatique n\'y touche pas':'Verrouiller cette planche'}" aria-pressed="${pinned}">${pinned?I_LOCK:I_UNLOCK}</button></div>
+      <div class="sp-top"><span class="sp-label" data-drop="plmove" data-pl="${plancheNo(s.key)}" title="Déposez ici un événement pour le déplacer sur cette planche">Pl. ${plancheNo(s.key)}</span><input class="spname" id="spn-${s.key}" data-act="spread-name" data-key="${s.key}" value="${esc(b.spreadNames[s.key]||'')}" placeholder="Nommer la planche" aria-label="Nom de la planche ${plancheNo(s.key)}">${(()=>{const pk=s.key===0?null:s.key===2?0:s.key-2;const pn=pk!=null&&b.spreadNames[pk];return pn&&pn!==b.spreadNames[s.key]?`<button class="spprev" data-act="sp-prev" data-key="${s.key}" title="Reprendre le nom de la planche précédente : « ${esc(pn)} »">↶ ${esc(pn.length>14?pn.slice(0,13)+'…':pn)}</button>`:''})()}${s.key>=2?`<button class="pl-del ${view.armed==='pldel:'+s.key?'armed':''}" data-act="pl-del-planche" data-key="${s.key}" title="${view.armed==='pldel:'+s.key?'Cliquer à nouveau pour supprimer la planche':'Supprimer cette planche (la suite recule d\'une planche)'}" aria-label="Supprimer la planche ${plancheNo(s.key)}">${view.armed==='pldel:'+s.key?'Supprimer ?':I_TRASH}</button>`:''}<button class="pin ${pinned?'on':''}" data-act="pin" data-key="${s.key}" title="${pinned?'Planche verrouillée : la répartition automatique n\'y touche pas':'Verrouiller cette planche'}" aria-pressed="${pinned}">${pinned?I_LOCK:I_UNLOCK}</button></div>
       <div class="pair">${PL?(pls.some(Boolean)?`<div class="pair-bg pl" aria-hidden="true"><div>${pls[0]&&pls[0].img?`<img src="${esc(imgSrc(pls[0].img))}" alt="">`:''}</div><div>${pls[1]&&pls[1].img?`<img src="${esc(imgSrc(pls[1].img))}" alt="">`:''}</div></div>`:''):l?`<div class="pair-bg" aria-hidden="true">${layVisual(l)}</div>`:''}${(s.l&&s.r&&b.pages[s.l]&&b.pages[s.l]===b.pages[s.r]&&ev[b.pages[s.l]])?wideCell(b,s,ev[b.pages[s.l]]):pageCell(b,s.l,'left',ev)+pageCell(b,s.r,'right',ev)}</div>
       ${PL?`<div class="sp-foot pl"><span class="pls-pair">${slot(s.l,pls[0])}${slot(s.r,pls[1])}</span><span class="lcount small">${pls.filter(Boolean).map(x=>esc(x.name)).join(' · ')}</span><span class="ph" title="Photos placées / blocs photo des mises en page">${placed||'–'}/${capPL||'–'}</span></div>
       ${view.plpick!=null&&pgs.includes(view.plpick)?plPicker(b,view.plpick):''}`:`<div class="sp-foot"><button class="thumb lthumb ${l?'':'none'}" data-act="lpick" data-key="${s.key}" ${l?`draggable="true" data-drag="spreadlay"`:''} title="${l?esc(l.name)+' · clic : changer · glisser vers une autre planche : échanger':'Choisir une mise en page'}">${l?layVisual(l):'<span>+ MEP</span>'}</button>
@@ -922,6 +922,19 @@ function insertPlanche(b,key){
   remapPages(b,n=>n>=key&&n<G?n+2:n);
   const max=Math.max(0,...Object.keys(b.pages).map(Number));let grew='';if(max>b.pageCount){b.pageCount=Math.ceil(max/4)*4;grew=` · le livre passe à ${b.pageCount} pages`}
   save(b);toastUndo(`Planche vide insérée en planche ${plancheNo(key)}${grew}`);
+}
+
+// Removes a planche: its two pages disappear, everything after moves back one planche (sides kept), the book keeps its page count
+function deletePlanche(b,key){
+  key=+key;if(key<2)return;remember(b);const gone=new Set([key,key+1]);const sh=n=>n>=key+2?n-2:n;
+  const lost=new Set(Object.entries(b.pages).filter(([p])=>gone.has(+p)).map(([,e])=>e));
+  const np={};for(const [p,e] of Object.entries(b.pages)){const n=+p;if(!gone.has(n))np[sh(n)]=e}b.pages=np;
+  for(const mp of SPREAD_MAPS){if(!b[mp])continue;const nm={};for(const [k,v] of Object.entries(b[mp])){const n=+k;if(n===key)continue;nm[n>key?n-2:n]=v}b[mp]=nm}
+  for(const p of gone){delete b.pageLay[p];for(const k of Object.keys(b.texts))if(+k.slice(0,k.indexOf('|'))===p)delete b.texts[k]}
+  remapPages(b,sh);
+  const still=new Set(Object.values(b.pages));const orphan=[...lost].filter(e=>!still.has(e)).length;
+  view.sel.clear();view.edit=null;save(b);
+  toastUndo(`Planche ${plancheNo(key)} supprimée · la suite recule d'une planche${orphan?` · ${orphan} événement${orphan>1?'s':''} dans « Sans page »`:''}`);
 }
 
 /* ---------- events tab ---------- */
@@ -1589,6 +1602,7 @@ document.addEventListener('click',async ev=>{
     case 'q-no':{const rec=b.texts[t.dataset.tk];const i=+t.dataset.i;if(rec&&rec.q){rec.q.splice(i,1);save(b)}break}
     case 'lp-set':{const k=t.dataset.key,id=t.dataset.lay;if(id)b.spreads[k]=id;else delete b.spreads[k];view.lpick=null;save(b);break}
     case 'ins-pl':insertPlanche(b,+t.dataset.key);break;
+    case 'pl-del-planche':{const k=+t.dataset.key;if(view.armed==='pldel:'+k){view.armed=null;deletePlanche(b,k)}else arm('pldel:'+k);break}
     case 'menu':view.menu=!view.menu;render();break;
     case 'undo':t.closest('.toast')?.remove();histUndo();break;
     case 'hist':view.hist=!view.hist;renderHistSlot();break;

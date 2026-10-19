@@ -156,6 +156,10 @@ tr.year td{background:var(--sunk);font-family:var(--f-display);font-weight:700;f
 .pg[draggable="true"]{cursor:grab}
 .pin{border:0;background:none;color:var(--muted);cursor:pointer;padding:2px;border-radius:4px;display:inline-grid;place-items:center;opacity:.55}
 .pin:hover{opacity:1}
+.pl-del{border:0;background:none;color:var(--muted);cursor:pointer;padding:2px 3px;border-radius:4px;display:inline-grid;place-items:center;opacity:0;font-size:10px;font-weight:600;white-space:nowrap;flex:none}
+.spread:hover .pl-del,.pl-del:focus-visible{opacity:.6}
+.pl-del:hover{opacity:1;color:var(--bad)}
+.pl-del.armed{opacity:1;background:var(--bad);color:#fff;padding:1px 6px}
 .pin.on{color:var(--accent);opacity:1}
 .pair{display:grid;grid-template-columns:1fr 1fr;background:var(--surface);border:1px solid var(--line);border-radius:3px;box-shadow:0 1px 0 var(--line)}
 .pg{position:relative;aspect-ratio:4/5;border:0;margin:0;padding:8px 8px 22px;text-align:left;cursor:pointer;background:var(--surface);display:flex;flex-direction:column;gap:4px;overflow:hidden;min-width:0}
