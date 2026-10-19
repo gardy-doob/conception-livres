@@ -1,4 +1,4 @@
-// Chemin de fer - conception livre : export des mises en page d'un fichier MEP
+// moodbook - conception livre : export des mises en page d'un fichier MEP
 // Installation : Fenêtre > Utilitaires > Scripts, clic droit sur « Utilisateur » > Faire apparaître dans le Finder,
 // copiez ce fichier dans ce dossier. Ouvrez le fichier MEP, puis double-cliquez sur le script dans le panneau Scripts.
 // Le script crée, à côté du fichier, un dossier « <nom du fichier> - export MEP » contenant :

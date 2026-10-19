@@ -1,4 +1,4 @@
-# Chemin de fer — conception livre
+# moodbook — conception livre
 
 Application web (HTML, CSS, JavaScript, sans installation) pour préparer des livres photo :
 chemin de fer par planches, événements, mises en page importées d'InDesign, définition des photos par bloc,
@@ -11,7 +11,7 @@ Adresse : https://gardy-doob.github.io/conception-livres/
 - Les photos sont lues directement sur l'ordinateur (dossiers choisis par livre) et ne sont jamais envoyées en ligne.
 
 ## Mises en page (fichiers MEP)
-1. `scripts/Export MEP - Chemin de fer.jsx` (aussi téléchargeable depuis l'onglet Mises en page) : à copier dans
+1. `scripts/Export MEP - moodbook.jsx` (aussi téléchargeable depuis l'onglet Mises en page) : à copier dans
    le dossier Scripts « Utilisateur » d'InDesign, puis à lancer sur le fichier MEP ouvert.
 2. Il crée « <fichier> - export MEP » : `mep.json` (blocs photo et texte, formes, superpositions, chaînages,
    colonnes, styles de paragraphe) et un aperçu basse définition de chaque page.
