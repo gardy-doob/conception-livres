@@ -169,9 +169,85 @@ async function saveLocal(id,removed){
       if(id&&removed)await idbDel('book:'+id);
       else if(id){const b=books.get(id);if(b)await idbPut('book:'+id,clone(b))}
       else{for(const b of books.values())await idbPut('book:'+b.id,clone(b))}
-      ping(id?{book:id}:{all:1});setSaved('Enregistré dans ce navigateur · '+stamp());return}
+      ping(id?{book:id}:{all:1});setSaved('Enregistré dans ce navigateur · '+stamp());cloudQueue(id,removed);return}
     catch(e){toast("Impossible d'enregistrer dans le navigateur : "+(e&&e.name==='QuotaExceededError'?'espace plein.':'stockage bloqué.'));setSaved('Non enregistré');return}}
   try{localStorage.setItem(LS_KEY,JSON.stringify({books:[...books.values()],captures}));ping(id?{book:id}:{all:1});setSaved('Enregistré dans ce navigateur · '+stamp())}catch(e){toast("Impossible d'enregistrer : stockage du navigateur plein ou bloqué. Faites une sauvegarde (.json).")}}
+/* ---- online storage (Supabase): every change is sent right away; a local copy stays in the browser for offline work ---- */
+const CLOUD={cfg:window.CDF_CONFIG||{},sb:null,user:null,pending:new Map(),timers:new Map(),started:false,channel:null,busy:false};
+const cloudConfigured=()=>!!(CLOUD.cfg.supabaseUrl&&CLOUD.cfg.supabaseKey&&window.supabase&&window.supabase.createClient);
+const cloudOn=()=>!!(CLOUD.sb&&CLOUD.user);
+function loadPending(){try{const o=JSON.parse(localStorage.getItem('cdf-pending')||'{}');CLOUD.pending=new Map(Object.entries(o))}catch(e){}}
+function savePending(){try{localStorage.setItem('cdf-pending',JSON.stringify(Object.fromEntries(CLOUD.pending)))}catch(e){}}
+function cloudStatus(){if(!cloudOn())return;const n=CLOUD.pending.size;setSaved(n?(navigator.onLine?`Envoi en ligne… (${n})`:`Hors ligne · ${n} modification${n>1?'s':''} en attente`):'En ligne · enregistré '+stamp())}
+function cloudQueue(id,removed){ // id null = every book
+  if(!CLOUD.sb)return;const ids=id?[id]:[...books.keys()];
+  for(const i of ids){CLOUD.pending.set(i,removed?'del':'put');clearTimeout(CLOUD.timers.get(i));CLOUD.timers.set(i,setTimeout(()=>cloudFlush(i),600))}
+  savePending();cloudStatus();
+}
+async function cloudFlush(id){
+  if(!cloudOn()||!navigator.onLine){cloudStatus();return}
+  const op=CLOUD.pending.get(id);if(!op)return;
+  try{
+    if(op==='del'||!books.get(id)){const {error}=await CLOUD.sb.from('books').delete().eq('id',id);if(error)throw error}
+    else{const b=books.get(id);const {id:_,...data}=b;const {error}=await CLOUD.sb.from('books').upsert({id,data:clone(data),updated_at:new Date().toISOString()});if(error)throw error}
+    if(CLOUD.pending.get(id)===op){CLOUD.pending.delete(id);savePending()}
+  }catch(e){clearTimeout(CLOUD.timers.get(id));CLOUD.timers.set(id,setTimeout(()=>cloudFlush(id),15000))}
+  cloudStatus();
+}
+function cloudFlushAll(){for(const id of CLOUD.pending.keys())cloudFlush(id)}
+window.addEventListener('online',()=>{cloudFlushAll();cloudStatus()});window.addEventListener('offline',cloudStatus);
+async function cloudPutCapture(key,data){if(!cloudOn())return;try{await CLOUD.sb.from('layout_images').upsert({key,data})}catch(e){}}
+async function cloudPutVersion(v){if(!cloudOn())return;try{await CLOUD.sb.from('book_versions').upsert({key:v.key,book_id:v.id,t:v.t,label:v.label||'',auto:!!v.auto,data:v.data})}catch(e){}}
+async function cloudDelVersion(key){if(!cloudOn())return;try{await CLOUD.sb.from('book_versions').delete().eq('key',key)}catch(e){}}
+async function selectAll(table,cols){const out=[];for(let from=0;;from+=500){const {data,error}=await CLOUD.sb.from(table).select(cols).range(from,from+499);if(error)throw error;out.push(...data);if(data.length<500)break}return out}
+function takeRemoteBook(id,data){const nb=normBook({...clone(data),id});books.set(id,nb);baseline(nb);if(IDB.ok)idbPut('book:'+id,clone(nb)).catch(()=>{})}
+async function cloudStart(){
+  if(!cloudOn()||CLOUD.busy)return;CLOUD.busy=true;setSaved('Synchronisation…');
+  try{
+    loadPending();
+    const rows=await selectAll('books','id,data,updated_at');const remote=new Map(rows.map(r=>[r.id,r]));
+    if(!rows.length&&books.size){for(const id of books.keys())CLOUD.pending.set(id,'put');toast(`Vos ${books.size} livres sont envoyés dans votre espace en ligne`)}
+    for(const [id,r] of remote){if(CLOUD.pending.has(id))continue;takeRemoteBook(id,r.data)}
+    if(rows.length)for(const id of [...books.keys()])if(!remote.has(id)&&!CLOUD.pending.has(id))CLOUD.pending.set(id,'put'); // books only on this computer: send them
+    savePending();
+    const vrows=await selectAll('book_versions','key,book_id,t,label,auto,data');
+    const known=new Set(vrows.map(v=>v.key));for(const v of versions)if(!known.has(v.key))cloudPutVersion(v);
+    versions=[...vrows.map(v=>({key:v.key,id:v.book_id,t:+v.t,label:v.label,auto:v.auto,data:v.data})),...versions.filter(v=>!known.has(v.key))];
+    const irows=await selectAll('layout_images','key,data');const ik=new Set(irows.map(r=>r.key));
+    for(const [k,v] of Object.entries(captures))if(!ik.has(k))cloudPutCapture(k,v);
+    irows.forEach(r=>{captures[r.key]=r.data;if(IDB.ok)idbPut('cap:'+r.key,r.data).catch(()=>{})});
+    if(!CLOUD.channel){
+      CLOUD.channel=CLOUD.sb.channel('cdf-'+CLOUD.user.id)
+        .on('postgres_changes',{event:'*',schema:'public',table:'books',filter:'user_id=eq.'+CLOUD.user.id},pl=>{
+          const id=(pl.new&&pl.new.id)||(pl.old&&pl.old.id);if(!id||CLOUD.pending.has(id))return;
+          if(pl.eventType==='DELETE'){books.delete(id);if(IDB.ok)idbDel('book:'+id).catch(()=>{})}else{const cur_=books.get(id);if(cur_&&same(strip(cur_),strip({...pl.new.data,id})))return;takeRemoteBook(id,pl.new.data);setSaved('Mis à jour depuis un autre appareil · '+stamp())}
+          softRender()})
+        .on('postgres_changes',{event:'*',schema:'public',table:'book_versions',filter:'user_id=eq.'+CLOUD.user.id},pl=>{
+          const k=(pl.new&&pl.new.key)||(pl.old&&pl.old.key);versions=versions.filter(v=>v.key!==k);
+          if(pl.eventType!=='DELETE'){const v=pl.new;versions.push({key:v.key,id:v.book_id,t:+v.t,label:v.label,auto:v.auto,data:v.data})}renderHistSlot()})
+        .on('postgres_changes',{event:'*',schema:'public',table:'layout_images',filter:'user_id=eq.'+CLOUD.user.id},pl=>{if(pl.new&&pl.new.key){captures[pl.new.key]=pl.new.data;softRender()}})
+        .subscribe();
+    }
+    loaded=true;cloudFlushAll();cloudStatus();render();
+  }catch(e){setSaved('Connexion en ligne impossible · travail local');toast("L'espace en ligne ne répond pas : vous travaillez en local, l'envoi se fera au retour de la connexion.")}
+  CLOUD.busy=false;
+}
+async function cloudInit(){
+  if(!cloudConfigured())return;
+  CLOUD.sb=window.supabase.createClient(CLOUD.cfg.supabaseUrl,CLOUD.cfg.supabaseKey,{auth:{persistSession:true,autoRefreshToken:true,storageKey:'cdf-auth'}});
+  try{const {data}=await CLOUD.sb.auth.getSession();CLOUD.user=data.session?data.session.user:null}catch(e){}
+  CLOUD.sb.auth.onAuthStateChange((ev,sess)=>{const u=sess?sess.user:null;const changed=(u&&u.id)!==(CLOUD.user&&CLOUD.user.id);CLOUD.user=u;if(changed){if(u)cloudStart();else{if(CLOUD.channel){CLOUD.sb.removeChannel(CLOUD.channel);CLOUD.channel=null}setSaved('Déconnecté · enregistré dans ce navigateur');render()}}});
+  if(CLOUD.user)await cloudStart();else render();
+}
+function renderCloudBox(){
+  if(!cloudConfigured()||CLOUD.user)return '';
+  return `<form class="panel cloudbox" id="cloud-login" novalidate>
+    <div><b>Votre espace en ligne</b><p class="small muted" style="margin:2px 0 0">Connectez-vous pour enregistrer vos livres en ligne et les retrouver sur tous vos ordinateurs. Les photos restent sur votre ordinateur.</p></div>
+    <input class="f" id="cl-email" type="email" autocomplete="email" placeholder="Adresse e-mail" value="${esc(view.cloudEmail||'')}">
+    <input class="f" id="cl-pass" type="password" autocomplete="current-password" placeholder="Mot de passe (6 caractères min.)">
+    <button class="btn primary" type="submit" data-mode="in">Se connecter</button><button class="btn" type="submit" data-mode="up">Créer mon compte</button>
+    ${view.cloudMsg?`<p class="small ${view.cloudErr?'err':'muted'}" style="grid-column:1/-1;margin:0">${esc(view.cloudMsg)}</p>`:''}</form>`;
+}
 async function loadIDB(){
   const all=await idbAll();let n=0;
   for(const [k,v] of all){if(k.startsWith('book:')){const nb=normBook(v);books.set(nb.id,nb);baseline(nb);n++}else if(k.startsWith('cap:'))captures[k.slice(4)]=v;else if(k.startsWith('dirs:'))dirHandles[k.slice(5)]=Object.assign(dirHandles[k.slice(5)]||{},v);else if(k.startsWith('dir:')){const bid=k.slice(4);dirHandles[bid]=Object.assign({f0:v},dirHandles[bid]||{})}else if(k.startsWith('ver:'))versions.push(v)}
@@ -223,8 +299,9 @@ let versions=[];const sessVer=new Set();
 async function storeVersion(v){
   if(mode==='db'){await db.doc('versions/'+v.key).set({bookId:v.id,t:v.t,label:v.label,auto:!!v.auto,data:v.data})}
   else if(IDB.ok){await idbPut('ver:'+v.key,v);ping({ver:v.key})}
+  cloudPutVersion(v);
 }
-async function dropVersion(v){versions=versions.filter(x=>x.key!==v.key);try{if(mode==='db')await db.doc('versions/'+v.key).delete();else if(IDB.ok){await idbDel('ver:'+v.key);ping({ver:v.key,del:1})}}catch(e){}}
+async function dropVersion(v){versions=versions.filter(x=>x.key!==v.key);try{if(mode==='db')await db.doc('versions/'+v.key).delete();else if(IDB.ok){await idbDel('ver:'+v.key);ping({ver:v.key,del:1})}cloudDelVersion(v.key)}catch(e){}}
 function addVersion(id,data,label,auto){
   if(!data)return;const t=Date.now();const v={key:id+'~'+t,id,t,label,auto:!!auto,data:clone(data)};versions.push(v);
   storeVersion(v).catch(()=>toast("La version n'a pas pu être enregistrée."));
@@ -296,7 +373,7 @@ async function removeBook(id){const old=books.get(id);if(old&&!applyingHist)reco
   if(mode==='db'){try{await db.doc('books/'+id).delete()}catch(e){toast('Suppression impossible pour le moment.')}}else saveLocal(id,true)}
 async function putCapture(key,data){captures[key]=data;
   if(mode==='db'){try{await db.doc('captures/'+key).set({data})}catch(e){toast("Image non enregistrée : l'espace est peut-être plein.")}}
-  else if(IDB.ok){try{await idbPut('cap:'+key,data);ping({cap:key})}catch(e){toast("Image non enregistrée : l'espace du navigateur est peut-être plein.")}}
+  else if(IDB.ok){try{await idbPut('cap:'+key,data);ping({cap:key})}catch(e){toast("Image non enregistrée : l'espace du navigateur est peut-être plein.")}cloudPutCapture(key,data)}
   else{try{localStorage.setItem(LS_KEY,JSON.stringify({books:[...books.values()],captures}))}catch(e){toast("Image non enregistrée : stockage du navigateur plein.")}}}
 async function boot(){
   render();
@@ -312,7 +389,7 @@ async function boot(){
     },()=>toast('Connexion aux données interrompue. Rechargez la page.'));
     db.collection('versions').onSnapshot(snap=>{versions=snap.docs.map(d=>{const x=d.data();return {key:d.id,id:x.bookId,t:x.t,label:x.label,auto:x.auto,data:x.data}});renderHistSlot()},()=>{});
     db.collection('captures').onSnapshot(snap=>{const c={};snap.docs.forEach(d=>c[d.id]=d.data().data);captures=c;softRender()},()=>{});
-  } else {mode='local';if(await idbOpen())await loadIDB();else loadLocal();loaded=true;setSaved(books.size?'Enregistré dans ce navigateur':'');render()}
+  } else {mode='local';if(await idbOpen())await loadIDB();else loadLocal();loaded=true;setSaved(books.size?'Enregistré dans ce navigateur':'');render();cloudInit()}
 }
 function softRender(){if(drag){needsRender=true;return}const a=document.activeElement;if(a&&a.closest&&a.closest('#app')&&/INPUT|TEXTAREA|SELECT/.test(a.tagName)&&a.type!=='checkbox'&&a.type!=='range'){needsRender=true;return}render()}
 document.addEventListener('focusout',()=>{if(needsRender&&!drag){needsRender=false;setTimeout(()=>{const a=document.activeElement;if(!(a&&/INPUT|TEXTAREA|SELECT/.test(a.tagName)))render();else needsRender=true},0)}});
@@ -510,7 +587,7 @@ function renderNav(b){
   const years=[...new Set(all.map(x=>+x.year||0))].sort((a,z)=>z-a);
   return {links:`<a href="#avancement" ${view.route==='avancement'?'aria-current="page"':''}>Avancement</a>${recent.map(x=>`<a href="#livre-${esc(x.id)}" ${b&&x.id===b.id?'aria-current="page"':''}>${esc(x.title)}</a>`).join('')}`,burger:`
     <span class="burger"><button class="icon-btn" data-act="menu" aria-expanded="${!!view.menu}" aria-label="Tous les livres" title="Tous les livres"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
-    ${view.menu?`<div class="menu panel">${years.map(y=>`<div class="menu-y">${y||'Sans année'}</div>${all.filter(x=>(+x.year||0)===y).sort((a,z)=>(a.order??999)-(z.order??999)||a.title.localeCompare(z.title)).map(x=>`<a href="#livre-${esc(x.id)}" ${b&&x.id===b.id?'aria-current="page"':''}>${esc(x.title)}</a>`).join('')}`).join('')}<div class="menu-sep"></div><a href="#avancement">Avancement de tous les livres</a><div class="menu-sep"></div><button class="mitem" data-act="backup">Sauvegarder dans un fichier (.json)</button><button class="mitem" data-act="restore">Restaurer une sauvegarde…</button></div>`:''}</span>`};
+    ${view.menu?`<div class="menu panel">${years.map(y=>`<div class="menu-y">${y||'Sans année'}</div>${all.filter(x=>(+x.year||0)===y).sort((a,z)=>(a.order??999)-(z.order??999)||a.title.localeCompare(z.title)).map(x=>`<a href="#livre-${esc(x.id)}" ${b&&x.id===b.id?'aria-current="page"':''}>${esc(x.title)}</a>`).join('')}`).join('')}<div class="menu-sep"></div><a href="#avancement">Avancement de tous les livres</a><div class="menu-sep"></div>${cloudConfigured()?(CLOUD.user?`<div class="menu-y">En ligne</div><div class="small muted" style="padding:2px 10px">${esc(CLOUD.user.email||'')}</div><button class="mitem" data-act="cloud-out">Se déconnecter</button>`:`<a href="#avancement">Se connecter à l'espace en ligne</a>`):''}<div class="menu-sep"></div><button class="mitem" data-act="backup">Sauvegarder dans un fichier (.json)</button><button class="mitem" data-act="restore">Restaurer une sauvegarde…</button></div>`:''}</span>`};
 }
 const headerH=()=>(document.querySelector('.top')?.offsetHeight||52);
 const UI_KEY='atelier-ui';
@@ -556,7 +633,7 @@ function renderProgress(){
         <td><a class="btn" href="#livre-${esc(b.id)}">Ouvrir</a></td></tr>`;
     }
   }
-  return `<div class="head"><div><div class="eyebrow">Tous les projets</div><h1>Avancement des livres</h1></div>
+  return renderCloudBox()+`<div class="head"><div><div class="eyebrow">Tous les projets</div><h1>Avancement des livres</h1></div>
     <button class="btn primary" data-act="show-new">+ Nouveau livre</button></div>
     ${newForm}
     <div class="kpis">
@@ -1119,6 +1196,7 @@ document.addEventListener('click',async ev=>{
     case 'folder-reopen':reopenFolder(b,t.dataset.fid);break;
     case 'folder-del':{const k='fold:'+t.dataset.fid;if(view.armed===k){view.armed=null;removeFolder(b,t.dataset.fid)}else arm(k);break}
     case 'folder-later':closeOverlay();break;
+    case 'cloud-out':{view.menu=false;if(CLOUD.pending.size&&!view.armedOut){view.armedOut=true;toast(`${CLOUD.pending.size} modification(s) pas encore envoyée(s) : cliquez à nouveau pour vous déconnecter quand même.`);break}view.armedOut=false;await CLOUD.sb.auth.signOut();break}
     case 'backup':{const data=JSON.stringify({app:'atelier-chemin-de-fer',saved:new Date().toISOString(),books:[...books.values()],captures},null,1);offerFile('atelier-sauvegarde-'+new Date().toISOString().slice(0,10)+'.json',data,data);view.menu=false;break}
     case 'restore':{const i=document.getElementById('restorepick');i.value='';i.click();view.menu=false;break}
     case 'cwd':lib.cwd=t.dataset.dir;render();{const s=document.getElementById('pb-scroll');if(s)s.scrollTop=0}break;
@@ -1291,6 +1369,13 @@ document.addEventListener('change',e=>{
 });
 document.addEventListener('submit',e=>{
   e.preventDefault();const f=e.target;const b=cur();
+  if(f.id==='cloud-login'){const email=document.getElementById('cl-email').value.trim(),pass=document.getElementById('cl-pass').value;view.cloudEmail=email;const m=(e.submitter&&e.submitter.dataset.mode)||'in';
+    if(!email||pass.length<6){view.cloudMsg='Indiquez votre e-mail et un mot de passe de 6 caractères minimum.';view.cloudErr=true;render();return}
+    view.cloudMsg=m==='up'?'Création du compte…':'Connexion…';view.cloudErr=false;render();
+    (async()=>{const r=m==='up'?await CLOUD.sb.auth.signUp({email,password:pass,options:{emailRedirectTo:location.href.split('#')[0]}}):await CLOUD.sb.auth.signInWithPassword({email,password:pass});
+      if(r.error){view.cloudMsg=/invalid login/i.test(r.error.message)?'E-mail ou mot de passe incorrect.':/already registered/i.test(r.error.message)?'Ce compte existe déjà : utilisez « Se connecter ».':/confirm/i.test(r.error.message)?'Confirmez d\'abord votre adresse avec le lien reçu par e-mail.':r.error.message;view.cloudErr=true}
+      else if(m==='up'&&!r.data.session){view.cloudMsg='Compte créé : cliquez sur le lien reçu par e-mail, puis connectez-vous.';view.cloudErr=false}
+      else{view.cloudMsg='';view.cloudErr=false}render()})();return}
   if(f.id==='ver-form'){const bk=books.get(view.id);if(!bk)return;const name=document.getElementById('ver-name').value.trim()||'Version manuelle';addVersion(bk.id,strip(bk),name,false);toast('Version enregistrée');return}
   if(f.id==='newbook'){const title=document.getElementById('nb-title').value.trim();const pages=parseInt(document.getElementById('nb-pages').value)||0;const year=document.getElementById('nb-year').value;
     view.newDraft={title,pages:document.getElementById('nb-pages').value,year};
