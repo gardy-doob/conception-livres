@@ -194,7 +194,8 @@
       }
       for (var q4 = 0; q4 < pages.length; q4++) {
         var pg = pages[q4], B = pb[q4];
-        var side = safe(function () { return pg.side == PageSideOptions.LEFT_HAND ? "l" : pg.side == PageSideOptions.RIGHT_HAND ? "r" : "s"; }, "s");
+        // Left / right from the position in the spread (sturdier than page.side): first of two pages = left
+        var side = pages.length >= 2 ? (q4 === 0 ? "l" : "r") : safe(function () { return pg.side == PageSideOptions.LEFT_HAND ? "l" : "r"; }, "r");
         var frs = []; for (var f = 0; f < recs[q4].length; f++) frs.push(recs[q4][f].fr);
         pageIdx++; pText.text = "Page " + pg.name + " (" + pageIdx + "/" + doc.pages.length + ")"; pBar.value = ++step;
         if (!frs.length) continue;
