@@ -205,8 +205,10 @@ async function cloudFlush(id){
   if(!cloudOn()||!navigator.onLine){cloudStatus();return}
   const op=CLOUD.pending.get(id);if(!op)return;
   try{
-    if(op==='del'||!books.get(id)){const {error}=await CLOUD.sb.from('books').delete().eq('id',id);if(error)throw error}
-    else{const b=books.get(id);const {id:_,...data}=b;const {error}=await CLOUD.sb.from('books').upsert({id,data:clone(data),updated_at:new Date().toISOString()});if(error)throw error}
+    if(op==='del'||!books.get(id)){const {error}=await CLOUD.sb.from('books').delete().eq('id',id).eq('user_id',CLOUD.user.id);if(error)throw error}
+    else{const b=books.get(id);const {id:_,_owner,...data}=b;const now=new Date().toISOString();
+      if(_owner&&_owner!==CLOUD.user.id){const {error}=await CLOUD.sb.from('books').update({data:clone(data),updated_at:now}).eq('user_id',_owner).eq('id',id);if(error)throw error}
+      else{const {error}=await CLOUD.sb.from('books').upsert({id,data:clone(data),updated_at:now});if(error)throw error}}
     if(CLOUD.pending.get(id)===op){CLOUD.pending.delete(id);savePending()}
   }catch(e){clearTimeout(CLOUD.timers.get(id));CLOUD.timers.set(id,setTimeout(()=>cloudFlush(id),15000))}
   cloudStatus();
@@ -217,14 +219,15 @@ async function cloudPutCapture(key,data){if(!cloudOn())return;try{await CLOUD.sb
 async function cloudPutVersion(v){if(!cloudOn())return;try{await CLOUD.sb.from('book_versions').upsert({key:v.key,book_id:v.id,t:v.t,label:v.label||'',auto:!!v.auto,data:v.data})}catch(e){}}
 async function cloudDelVersion(key){if(!cloudOn())return;try{await CLOUD.sb.from('book_versions').delete().eq('key',key)}catch(e){}}
 async function selectAll(table,cols){const out=[];for(let from=0;;from+=500){const {data,error}=await CLOUD.sb.from(table).select(cols).range(from,from+499);if(error)throw error;out.push(...data);if(data.length<500)break}return out}
-function takeRemoteBook(id,data){const nb=normBook({...clone(data),id});books.set(id,nb);baseline(nb);if(IDB.ok)idbPut('book:'+id,clone(nb)).catch(()=>{})}
+function takeRemoteBook(id,data,owner){const nb=normBook({...clone(data),id});if(owner&&CLOUD.user&&owner!==CLOUD.user.id)nb._owner=owner;else delete nb._owner;books.set(id,nb);baseline(nb);if(IDB.ok)idbPut('book:'+id,clone(nb)).catch(()=>{})}
 async function cloudStart(){
   if(!cloudOn()||CLOUD.busy)return;CLOUD.busy=true;setSaved('Synchronisation…');
   try{
     loadPending();
-    const rows=await selectAll('books','id,data,updated_at');const remote=new Map(rows.map(r=>[r.id,r]));
+    let rows;try{rows=await selectAll('books','id,data,updated_at,user_id')}catch(e){rows=await selectAll('books','id,data,updated_at')}
+    const remote=new Map();for(const r of rows){const mine=!r.user_id||r.user_id===CLOUD.user.id;if(!remote.has(r.id)||mine)remote.set(r.id,r)}
     if(!rows.length&&books.size){for(const id of books.keys())CLOUD.pending.set(id,'put');toast(`Vos ${books.size} livres sont envoyés dans votre espace en ligne`)}
-    for(const [id,r] of remote){if(CLOUD.pending.has(id))continue;takeRemoteBook(id,r.data)}
+    for(const [id,r] of remote){if(CLOUD.pending.has(id))continue;takeRemoteBook(id,r.data,r.user_id)}
     if(rows.length)for(const id of [...books.keys()])if(!remote.has(id)&&!CLOUD.pending.has(id))CLOUD.pending.set(id,'put'); // books only on this computer: send them
     savePending();
     const vrows=await selectAll('book_versions','key,book_id,t,label,auto,data');
@@ -235,16 +238,23 @@ async function cloudStart(){
     irows.forEach(r=>{captures[r.key]=r.data;if(IDB.ok)idbPut('cap:'+r.key,r.data).catch(()=>{})});
     if(!CLOUD.channel){
       CLOUD.channel=CLOUD.sb.channel('cdf-'+CLOUD.user.id)
-        .on('postgres_changes',{event:'*',schema:'public',table:'books',filter:'user_id=eq.'+CLOUD.user.id},pl=>{
+        .on('postgres_changes',{event:'*',schema:'public',table:'books'},pl=>{
           const id=(pl.new&&pl.new.id)||(pl.old&&pl.old.id);if(!id||CLOUD.pending.has(id))return;
-          if(pl.eventType==='DELETE'){books.delete(id);if(IDB.ok)idbDel('book:'+id).catch(()=>{})}else{const cur_=books.get(id);if(cur_&&same(strip(cur_),strip({...pl.new.data,id})))return;takeRemoteBook(id,pl.new.data);setSaved('Mis à jour depuis un autre appareil · '+stamp())}
+          if(pl.eventType==='DELETE'){if(pl.old&&pl.old.user_id&&pl.old.user_id!==CLOUD.user.id&&books.get(id)&&!books.get(id)._owner)return;books.delete(id);if(IDB.ok)idbDel('book:'+id).catch(()=>{})}
+          else{const ow=pl.new.user_id;const ex=books.get(id);if(ex&&ow&&ow!==CLOUD.user.id&&!ex._owner)return; // same id as one of my own books
+            const cur_=books.get(id);if(cur_&&same(strip({...cur_,_owner:undefined}),strip({...pl.new.data,id,_owner:undefined})))return;takeRemoteBook(id,pl.new.data,ow);if(inCreation(books.get(id)))applyCreation(books.get(id));setSaved('Mis à jour depuis un autre appareil · '+stamp())}
           softRender()})
+        .on('postgres_changes',{event:'*',schema:'public',table:'blocks'},crOnBlock)
+        .on('postgres_changes',{event:'*',schema:'public',table:'book_presence'},crOnPresence)
+        .on('postgres_changes',{event:'*',schema:'public',table:'creations'},pl=>{if(pl.new&&pl.new.book_id)crTake(pl.new).then(()=>softRender())})
+        .on('postgres_changes',{event:'*',schema:'public',table:'creation_images'},pl=>{const r=pl.new;const b=r&&books.get(r.book_id);if(b){captures[crImg(b,r.key)]=r.data;softRender()}})
         .on('postgres_changes',{event:'*',schema:'public',table:'book_versions',filter:'user_id=eq.'+CLOUD.user.id},pl=>{
           const k=(pl.new&&pl.new.key)||(pl.old&&pl.old.key);versions=versions.filter(v=>v.key!==k);
           if(pl.eventType!=='DELETE'){const v=pl.new;versions.push({key:v.key,id:v.book_id,t:+v.t,label:v.label,auto:v.auto,data:v.data})}renderHistSlot()})
         .on('postgres_changes',{event:'*',schema:'public',table:'layout_images',filter:'user_id=eq.'+CLOUD.user.id},pl=>{if(pl.new&&pl.new.key){captures[pl.new.key]=pl.new.data;softRender()}})
         .subscribe();
     }
+    await crLoadAll();
     loaded=true;cloudFlushAll();cloudStatus();render();
   }catch(e){setSaved('Connexion en ligne impossible · travail local');toast("L'espace en ligne ne répond pas : vous travaillez en local, l'envoi se fera au retour de la connexion.")}
   CLOUD.busy=false;
@@ -380,7 +390,7 @@ function renderHistSlot(){
       <p class="small muted" style="padding:4px 10px;margin:0">L'historique ci-dessus couvre la séance en cours.</p>
       ${verSection()}</div>`:''}</span>`;
 }
-function save(b,quiet){b.updatedAt=new Date().toISOString();books.set(b.id,b);if(!applyingHist)record(b);if(!quiet)render();
+function save(b,quiet){b.updatedAt=new Date().toISOString();books.set(b.id,b);if(!applyingHist)record(b);if(!quiet)render();crPush(b);
   if(mode!=='db'){saveLocal(b.id);return}
   const p=pending.get(b.id)||{};clearTimeout(p.t);p.t=setTimeout(()=>flush(b.id),450);pending.set(b.id,p);setSaved('Enregistrement…')}
 async function flush(id){const p=pending.get(id);if(!p)return;if(p.writing){p.again=true;return}
@@ -488,7 +498,7 @@ async function offerFile(filename,data,fallbackText,fallbackName){
   showModal(`<h3>Téléchargement indisponible ici</h3><p class="muted small">Copiez le texte ci-dessous et enregistrez-le dans un fichier nommé <b>${esc(fallbackName||filename)}</b>.</p><textarea readonly id="fallback-text">${esc(fallbackText||'')}</textarea><div class="row"><button class="btn primary" data-act="copy-fallback">Copier</button><button class="btn" data-act="close-overlay">Fermer</button></div>`);
 }
 function showModal(html,cls){document.getElementById('overlay').innerHTML=`<div class="overlay" data-act="overlay-bg"><div class="modal ${cls||''}" role="dialog" aria-modal="true">${html}</div></div>`}
-function closeOverlay(){view.mepSettings=false;document.getElementById('overlay').innerHTML='';if(lightbox&&lightbox.url)URL.revokeObjectURL(lightbox.url);lightbox=null}
+function closeOverlay(){view.mepSettings=false;view.share=null;document.getElementById('overlay').innerHTML='';if(lightbox&&lightbox.url)URL.revokeObjectURL(lightbox.url);lightbox=null}
 
 /* ================= photo library (EXIF) ================= */
 function parseTiff(v,t){
@@ -537,7 +547,7 @@ async function loadFolderFiles(b,fid,files){
   let i=0;const worker=async()=>{while(i<fresh.length){const it=fresh[i++];if(/\.(jpe?g|tiff?|dng|cr2|nef|arw|orf|rw2)$/i.test(it.name)){const r=await readExif(it.file);if(r){if(r.date){it.date=r.date;it.dateSrc='exif'}if(r.orient)it.orient=r.orient;if(r.thumbBlob)it.thumbBlob=r.thumbBlob}}
     lib.loading.done++;if(lib.loading.done%60===0)updateLoading()}};
   await Promise.all(Array.from({length:6},worker));
-  lib.loading=null;const ex=fresh.filter(x=>x.dateSrc==='exif').length;setTimeout(()=>toast(`« ${fo.name} » : ${fresh.length} photos, ${ex} avec date de prise de vue`),50);render();
+  lib.loading=null;if(inCreation(b)){applyCreation(b);baseline(b)}const ex=fresh.filter(x=>x.dateSrc==='exif').length;setTimeout(()=>toast(`« ${fo.name} » : ${fresh.length} photos, ${ex} avec date de prise de vue`),50);render();
 }
 // Registers a folder for the book: mode 'add' (new or same-name folder) or 'replace' an existing one
 function registerFolder(b,name,mode,fid){
@@ -626,6 +636,7 @@ function render(){
   for(const [id,k] of [['pb-scroll','pb'],['ps-scroll','ps'],['tray-list','tr']]){const el=document.getElementById(id);if(el&&keep[k]!=null)el.scrollTop=keep[k]}
   document.documentElement.style.setProperty('--toph',headerH()+'px');observeTiles();renderSelbar();renderPool();if(loaded)saveUI();maybeReopenDir();
   if(view.route==='livre'&&view.tab==='redac')flowAll();
+  crPresence();{const bb=view.route==='livre'?books.get(view.id):null;const want=bb&&inCreation(bb)&&view.tab==='redac'&&view.rsel?'s'+String(view.rsel).split('#')[1]:null;if(want!==CR.lockBid){if(want)crLock(bb,want);else crUnlock(bb||books.get(CR.lockBook))}CR.lockBook=bb&&bb.id}
   if(view.mepSettings){if(view.route==='livre'&&view.tab==='layouts'&&view._mepSet){const sc=document.querySelector('#overlay .modal')?.scrollTop;showModal(view._mepSet,'wide mepset');const md=document.querySelector('#overlay .modal');if(md&&sc)md.scrollTop=sc}else closeOverlay()}
   if(view.edit){const t=document.getElementById('pe-text');if(t&&document.activeElement!==t){t.focus();t.setSelectionRange(t.value.length,t.value.length)}}
 }
@@ -636,7 +647,7 @@ function renderNav(b){
   const years=[...new Set(all.map(x=>+x.year||0))].sort((a,z)=>z-a);
   return {links:`<a href="#avancement" ${view.route==='avancement'?'aria-current="page"':''}>Avancement</a>${recent.map(x=>`<a href="#livre-${esc(x.id)}" ${b&&x.id===b.id?'aria-current="page"':''}>${esc(x.title)}</a>`).join('')}`,burger:`
     <span class="burger"><button class="icon-btn" data-act="menu" aria-expanded="${!!view.menu}" aria-label="Tous les livres" title="Tous les livres"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
-    ${view.menu?`<div class="menu panel">${years.map(y=>`<div class="menu-y">${y||'Sans année'}</div>${all.filter(x=>(+x.year||0)===y).sort((a,z)=>(a.order??999)-(z.order??999)||a.title.localeCompare(z.title)).map(x=>`<a href="#livre-${esc(x.id)}" ${b&&x.id===b.id?'aria-current="page"':''}>${esc(x.title)}</a>`).join('')}`).join('')}<div class="menu-sep"></div><a href="#avancement">Avancement de tous les livres</a><div class="menu-sep"></div>${cloudConfigured()?(CLOUD.user?`<div class="menu-y">En ligne</div><div class="small muted" style="padding:2px 10px">${esc(CLOUD.user.email||'')}</div><button class="mitem" data-act="cloud-out">Se déconnecter</button>`:`<a href="#avancement">Se connecter à l'espace en ligne</a>`):''}<div class="menu-sep"></div><button class="mitem" data-act="backup">Sauvegarder dans un fichier (.json)</button><button class="mitem" data-act="restore">Restaurer une sauvegarde…</button></div>`:''}</span>`};
+    ${view.menu?`<div class="menu panel">${years.map(y=>`<div class="menu-y">${y||'Sans année'}</div>${all.filter(x=>(+x.year||0)===y).sort((a,z)=>(a.order??999)-(z.order??999)||a.title.localeCompare(z.title)).map(x=>`<a href="#livre-${esc(x.id)}" ${b&&x.id===b.id?'aria-current="page"':''}>${esc(x.title)}</a>`).join('')}`).join('')}<div class="menu-sep"></div><a href="#avancement">Avancement de tous les livres</a><div class="menu-sep"></div>${cloudConfigured()?(CLOUD.user?`<div class="menu-y">En ligne</div><div class="small muted" style="padding:2px 10px">${esc(CLOUD.user.email||'')}</div><button class="mitem" data-act="cloud-out">Se déconnecter</button>`:`<a href="#avancement">Se connecter à l'espace en ligne</a>`):''}<div class="menu-sep"></div><a href="indesign/moodbook.ccx" download>Télécharger le panneau InDesign</a><div class="menu-sep"></div><button class="mitem" data-act="backup">Sauvegarder dans un fichier (.json)</button><button class="mitem" data-act="restore">Restaurer une sauvegarde…</button></div>`:''}</span>`};
 }
 const headerH=()=>(document.querySelector('.top')?.offsetHeight||52);
 // Brings a full-height view (Visuel, Rédaction) right under the sticky section tabs
@@ -710,7 +721,7 @@ function renderBook(b){
   const alertList=[m.over.length?`${m.over.length} mise${m.over.length>1?'s':''} en page utilisée${m.over.length>1?'s':''} plus de ${b.maxReuse} fois`:'',m.short.length?`${m.short.length} événement${m.short.length>1?'s':''} sans assez de places photo`:''].filter(Boolean);
   const head=`<header class="bookhead2">
       <div class="bh-main">
-        <span class="eyebrow">Livre</span>
+        <span class="eyebrow">Livre${isShared(b)?' · <span class="shared-tag">partagé avec vous</span>':''}${inCreation(b)?' · <span class="cr-tag">en création</span>':''}</span>
         <input class="titleinput" id="bk-title" data-act="title" value="${esc(b.title)}" aria-label="Titre du livre">
         <div class="bh-specs">
           <label class="spec">Année<input class="mini mono" type="number" id="bk-year" data-act="year" value="${b.year}" aria-label="Année"></label>
@@ -719,10 +730,11 @@ function renderBook(b){
         </div>
       </div>
       <div class="bh-act">
-        <div class="row" style="gap:6px;justify-content:flex-end"><button class="btn primary" data-act="export-indd" ${m.placed||m.texts?'':'disabled'} title="${m.placed||m.texts?'Script InDesign : photos placées et textes rédigés':'Placez des photos ou rédigez des textes pour activer l\'export'}">Export InDesign</button><button class="btn" data-act="export-csv" ${m.placed?'':'disabled'}>CSV</button></div>
-        <button class="btn ghost sm danger ${view.armed==='book'?'armed':''}" data-act="del-book">${view.armed==='book'?'Confirmer la suppression':'Supprimer le livre'}</button>
+        <div class="row" style="gap:6px;justify-content:flex-end">${inCreation(b)?'<span class="sync-chip" title="Les photos et les textes se synchronisent avec le panneau moodbook d\'InDesign">⇄ Synchronisé avec InDesign</span>':''}<button class="btn ${inCreation(b)?'':'primary'}" data-act="export-indd" ${m.placed||m.texts?'':'disabled'} title="${m.placed||m.texts?'Script InDesign : photos placées et textes rédigés':'Placez des photos ou rédigez des textes pour activer l\'export'}">Export InDesign</button><button class="btn" data-act="export-csv" ${m.placed?'':'disabled'}>CSV</button></div>
+        <div class="row" style="gap:6px;justify-content:flex-end">${cloudOn()&&!isShared(b)?`<button class="btn ghost sm" data-act="share">Partager</button>`:''}${isShared(b)?'':`<button class="btn ghost sm danger ${view.armed==='book'?'armed':''}" data-act="del-book">${view.armed==='book'?'Confirmer la suppression':'Supprimer le livre'}</button>`}</div>
       </div>
     </header>
+    <div id="presence-slot" class="presence">${inCreation(b)?presenceHtml():''}</div>
     <div class="kcards">
       ${kc('Événements',`${m.filled}<small>/${b.pageCount}</small>`,'pages renseignées',pctOf(m.filled,b.pageCount))}
       ${m.PL?kc('Mises en page posées',`${m.withLay}<small>/${b.pageCount}</small>`,'pages',pctOf(m.withLay,b.pageCount)):kc('Mises en page posées',`${m.withLay}<small>/${m.sp.length}</small>`,'planches',pctOf(m.withLay,m.sp.length))}
@@ -733,13 +745,15 @@ function renderBook(b){
     </div>`;
   const lo=Math.floor(b.pageCount/4)*4,hi=lo+4;
   const warn=b.pageCount%4?`<div class="warnbar">${b.pageCount} pages n'est pas un multiple de 4.${lo?`<button class="btn sm" data-act="setpages" data-n="${lo}">Passer à ${lo} pages</button>`:''}<button class="btn sm" data-act="setpages" data-n="${hi}">Passer à ${hi} pages</button></div>`:'';
-  const curTab=view.tab==='cdf'?(view.cdfMode==='photos'?'visuel':'cdf'):view.tab;
+  const curTab=view.tab==='cdf'?(view.cdfMode==='photos'?'visuel':'cdf'):view.tab;const CRM0=inCreation(b);
   const tb=(id,tab,mode,label,count)=>`<button role="tab" aria-selected="${curTab===id}" data-act="tab" data-tab="${tab}" ${mode?`data-mode="${mode}"`:''}>${label}${count!==''&&count!=null?`<span class="count">${count}</span>`:''}</button>`;
   const tabs=`<nav class="tabs2" aria-label="Sections du livre">
-      <div class="tgrp"><span class="tgl"><span class="tgn">1</span>Conception<span class="tgd">structure du livre</span></span><div class="tabs" role="tablist">${tb('layouts','layouts','','Mises en page',m.nLay)}${tb('cdf','cdf','plan','Chemin de fer',m.sp.length+' pl.')}</div></div>
-      <div class="tgrp"><span class="tgl"><span class="tgn">2</span>Création<span class="tgd">photos et textes</span></span><div class="tabs" role="tablist">${tb('visuel','cdf','photos','Visuel',m.placed?m.placed+' ph.':'')}${tb('redac','redac','','Rédaction',m.texts||'')}</div></div></nav>`;
-  let body='';
-  if(view.tab==='cdf')body=view.cdfMode==='photos'?renderPhotos(b,m,ev):renderCdf(b,m,ev);
+      <div class="tgrp ${CRM0?'done':''}"><span class="tgl"><span class="tgn">${CRM0?'✓':'1'}</span>Conception<span class="tgd">${CRM0?'terminée':'structure du livre'}</span></span><div class="tabs" role="tablist">${tb('layouts','layouts','','Mises en page',m.nLay)}${tb('cdf','cdf','plan','Chemin de fer',m.sp.length+' pl.')}</div></div>
+      <div class="tgrp"><span class="tgl"><span class="tgn">2</span>Création<span class="tgd">${CRM0?'synchronisée avec InDesign':'photos et textes'}</span></span><div class="tabs" role="tablist">${tb('visuel','cdf','photos','Visuel',m.placed?m.placed+' ph.':'')}${tb('redac','redac','','Rédaction',m.texts||'')}</div></div></nav>`;
+  let body='';const CRM=inCreation(b);
+  if(CRM&&(view.tab==='layouts'||(view.tab==='cdf'&&view.cdfMode!=='photos'))){const c=crOf(b);
+    body=`<div class="panel emptystate"><h2>${I_LOCK} Conception terminée</h2><p class="muted">Ce livre est en création depuis le document InDesign « ${esc(c.data.doc||'')} »${c.data.at?' ('+esc(fmtVer(c.data.at))+')':''} : ses pages, ses blocs photo et ses blocs texte viennent maintenant du document, et se synchronisent avec InDesign.</p><div class="row" style="justify-content:center"><button class="btn primary" data-act="tab" data-tab="cdf" data-mode="photos">Aller au Visuel</button><button class="btn" data-act="tab" data-tab="redac">Aller à la Rédaction</button></div></div>`}
+  else if(view.tab==='cdf')body=view.cdfMode==='photos'?renderPhotos(b,m,ev):renderCdf(b,m,ev);
   else if(view.tab==='redac')body=renderRedac(b,m,ev);else body=renderPageLayouts(b,m,ev);
   return head+warn+tabs+body;
 }
@@ -914,7 +928,7 @@ function renderPhotos(b,m,ev){
           inner=`<div class="pz-mep">${plBlocks(lp,F,s.key,side)}</div>${F.extra.length?`<div class="pz-extra"><span class="pz-l">À placer (${F.extra.length}) :</span>${F.extra.map(({a,i})=>athumbHtml(s.key,a,i)).join('')}${freeB?`<button class="pz-btn" data-act="fill-blocks" data-key="${s.key}" data-side="${side}" title="Pose ces photos dans les blocs vides de cette page, dans l'ordre">Remplir les ${Math.min(freeB,F.extra.length)} bloc${Math.min(freeB,F.extra.length)>1?'s':''} vide${Math.min(freeB,F.extra.length)>1?'s':''}</button>`:''}</div>`:''}`}
         else inner=list.map(({a,i},j)=>athumbHtml(s.key,a,i,j)).join('');
         return `<div class="pz ${view.active===s.key&&defaultSide(s.key)===side?'act':''}" data-drop="psr" data-key="${s.key}" data-side="${side}" data-act="activate-side" title="Page ${side==='l'?'gauche':'droite'} ${pg||''} : glissez des photos ici${lp?' ou directement dans un bloc':''}">
-          <span class="pz-l">${side==='l'?'Gauche':'Droite'} · p. ${pg||'–'}${lp?` · ${F.map.size}/${plPhotos(lp)} bloc${plPhotos(lp)>1?'s':''}`:list.length?` · ${list.length} ph.`:''}${lp&&F.map.size?`<button class="pz-btn" data-act="empty-blocks" data-key="${s.key}" data-side="${side}" title="Sortir les photos des blocs (elles restent sur la page, à placer)" style="margin-left:4px">Vider</button>`:''}${PL&&pg?`<button class="pz-lay ${lp?'':'none'}" data-act="plpick" data-page="${pg}" title="Choisir la mise en page de la page ${pg} (une page seule ou la planche entière)">${lp?'MEP '+esc(lp.name):'Choisir la MEP'} <span class="cv">▼</span></button>`:''}</span>${pg&&ev[b.pages[pg]]?`<span class="pz-t">${esc(ev[b.pages[pg]].name)}</span>`:''}
+          <span class="pz-l">${side==='l'?'Gauche':'Droite'} · p. ${pg||'–'}${lp?` · ${F.map.size}/${plPhotos(lp)} bloc${plPhotos(lp)>1?'s':''}`:list.length?` · ${list.length} ph.`:''}${lp&&F.map.size?`<button class="pz-btn" data-act="empty-blocks" data-key="${s.key}" data-side="${side}" title="Sortir les photos des blocs (elles restent sur la page, à placer)" style="margin-left:4px">Vider</button>`:''}${PL&&pg&&!inCreation(b)?`<button class="pz-lay ${lp?'':'none'}" data-act="plpick" data-page="${pg}" title="Choisir la mise en page de la page ${pg} (une page seule ou la planche entière)">${lp?'MEP '+esc(lp.name):'Choisir la MEP'} <span class="cv">▼</span></button>`:''}</span>${pg&&ev[b.pages[pg]]?`<span class="pz-t">${esc(ev[b.pages[pg]].name)}</span>`:''}
           ${inner}${PL&&pg&&view.plpick===pg?plPicker(b,pg):''}</div>`}).join('')}</div>
     </section>`}).join('');
   const right=`<div class="panel pane">
@@ -1070,8 +1084,11 @@ const sideEntries=(b,key,side)=>(b.assign[key]||[]).map((a,i)=>({a,i})).filter(x
 const pageOfSide=(key,side)=>+key===0?1:(side==='l'?+key:+key+1);
 function athumbHtml(key,a,i,j){const it=lib.byPath.get(a.p);return `<div class="athumb ${it?'':'missing'}" draggable="true" data-drag="assigned" data-key="${key}" data-idx="${i}" ${it?`data-tid="${it.id}"`:''} title="${esc(a.p)}">${it&&it.thumb?thumbImg(it):`<span class="nm">${esc(baseName(a.p))}</span>`}${j!=null?`<span class="ord">${j+1}</span>`:''}<button class="x" data-act="unassign" data-key="${key}" data-idx="${i}" aria-label="Retirer">×</button></div>`}
 function plBlocks(l,F,key,side){
-  const src=imgSrc(l.img);
+  const src=imgSrc(l.img);const cb=cur();const crr=l.cr&&cb?crOf(cb):null;
   return `<div class="plv" style="aspect-ratio:${l.w}/${l.h};--hw:${(l.h/l.w).toFixed(4)}">${src?`<img class="plv-bg" src="${esc(src)}" alt="">`:''}${F.frs.map((f,j)=>{const e=F.map.get(f.id);const it=e&&lib.byPath.get(e.a.p);
+    const lk=crr&&lockedByOther(crr.rows.get(f.id));
+    if(lk)return `<div class="fr ph locked ${f.sh==='ov'?'ov':''}" style="${frStyle(f)}" title="En cours de modification par ${esc(lockWho(crr.rows.get(f.id)))}">${e&&it&&(it.big||it.thumb)?blockImg(it):''}<span class="lk">${I_LOCK}</span></div>`;
+    if(crr&&e&&!it)return `<div class="fr ph cr-keep" data-drop="blk" data-key="${key}" data-side="${side}" data-f="${esc(f.id)}" style="${frStyle(f)}" title="${esc(baseName(e.a.p))} (photo placée dans InDesign) · déposez une photo pour la remplacer"></div>`;
     return `<div class="fr ph ${f.sh==='ov'?'ov':''} ${e?'full':''}" data-drop="blk" data-key="${key}" data-side="${side}" data-f="${esc(f.id)}" style="${frStyle(f)}" ${e?`draggable="true" data-drag="assigned" data-key="${key}" data-idx="${e.i}" ${it?`data-tid="${it.id}"`:''} title="${esc(e.a.p)} · glisser dans un autre bloc pour échanger"`:`title="Bloc ${j+1} : déposez une photo"`}>${e?(it&&(it.big||it.thumb)?blockImg(it):`<span class="nm">${esc(baseName(e.a.p))}</span>`)+`<button class="x" data-act="unassign" data-key="${key}" data-idx="${e.i}" aria-label="Retirer">×</button>`:j+1}</div>`}).join('')}</div>`;
 }
 function plPicker(b,page){
@@ -1209,7 +1226,7 @@ function spreadStories(b,key){
 function pageStories(b,p){return spreadStories(b,spreadKeyOf(p)).filter(s=>s.page===p)}
 const plainOf=p=>(p.runs||[]).map(r=>r.t).join('');
 const hasText=rec=>!!(rec&&rec.paras&&rec.paras.some(p=>plainOf(p).trim()));
-function textState(rec){if(!hasText(rec))return '';if(rec.st==='checking')return 'draft';if(rec.st!=='done')return 'draft';return rec.q&&rec.q.length?'q':'done'}
+function textState(rec){if(!hasText(rec)||!rec.st)return '';if(rec.st==='checking')return 'draft';if(rec.st!=='done')return 'draft';return rec.q&&rec.q.length?'q':'done'}
 function allStories(b){const out=[];for(const s of spreadsOf(b.pageCount))out.push(...spreadStories(b,s.key));return out}
 function storyContent(b,s){const rec=b.texts[s.tkey];if(hasText(rec))return {paras:rec.paras,user:true};return {paras:((s.story&&s.story.paras)||[]).map(p=>({runs:[{t:p.t||''}]})),user:false}}
 function weightOf(fs){fs=String(fs||'');return /black|heavy|ultra/i.test(fs)?800:/extra ?bold/i.test(fs)?800:/semi|demi/i.test(fs)?600:/bold|gras/i.test(fs)?700:/medium/i.test(fs)?500:/light/i.test(fs)?300:/thin|hair/i.test(fs)?200:400}
@@ -1256,13 +1273,14 @@ function rPage(b,key,p,side,l,stories){
   if(!p)return `<div class="rpage blank ${side}"></div>`;
   if(!l)return `<div class="rpage nolay ${side}"><span>p. ${p}<br>Pas de mise en page<br><button class="btn sm" data-act="r-plpick" data-page="${p}" style="margin-top:8px">Choisir</button></span></div>`;
   const W=l.w;const F=pageFill(l,sideEntries(b,key,side));
-  const ph=F.frs.map((f,j)=>{const e=F.map.get(f.id);const it=e&&lib.byPath.get(e.a.p);return `<div class="fr ph ${f.sh==='ov'?'ov':''} ${e?'full':''}" style="${frStyle(f)}" ${it?`data-tid="${it.id}"`:''}>${e?(it&&(it.big||it.thumb)?blockImg(it):`<span class="nm">${esc(baseName(e.a.p))}</span>`):j+1}</div>`}).join('');
+  const ph=F.frs.map((f,j)=>{const e=F.map.get(f.id);const it=e&&lib.byPath.get(e.a.p);if(l.cr&&e&&!it)return '';return `<div class="fr ph ${f.sh==='ov'?'ov':''} ${e?'full':''}" style="${frStyle(f)}" ${it?`data-tid="${it.id}"`:''}>${e?(it&&(it.big||it.thumb)?blockImg(it):`<span class="nm">${esc(baseName(e.a.p))}</span>`):j+1}</div>`}).join('');
   const tx=l.frames.filter(f=>f.k==='tx').map(f=>{const s=stories.find(x=>x.frames.some(y=>y.f===f&&y.page===p));if(!s)return '';const head=s.frames[0].f===f&&s.frames[0].page===p;
     const ins=f.ins||[0,0,0,0];const pad=`padding:${cq(ins[0],W)} ${cq(ins[3],W)} ${cq(ins[2],W)} ${cq(ins[1],W)};`;
     const cols=(f.cols||1)>1?`column-count:${f.cols};column-gap:${cq(f.gut||12,W)};`:'';const vj=(f.cols||1)===1&&f.vj&&f.vj!=='t'?{c:'safe center',b:'safe flex-end',j:'space-between'}[f.vj]:'';
     const bg=f.bg?`background:${cssColor(f.bg)};`:'';const sk=f.sk?`box-shadow:inset 0 0 0 ${cq(f.sk.w,W)} ${cssColor(f.sk.c)};`:'';
     const n=(s.story&&s.story.n)||s.frames.length;const st=textState(b.texts[s.tkey]);
-    return `<div class="fr tx ${view.rsel===s.tkey?'sel':''}" data-act="rsel" data-tk="${esc(s.tkey)}" data-ci="${f.ci||0}" style="${frStyle(f)}${bg}${sk}" title="Clic : rédiger ce texte"><div class="tfi" style="${pad}"><div class="tfc ${vj?'vj':''}" style="${cols}${vj?`justify-content:${vj};`:''}"></div></div>${n>1?`<span class="chain" title="Texte chaîné">${(f.ci||0)+1}/${n}</span>`:''}${head&&st?`<span class="badge-st ${st}" title="${st==='done'?'Terminé et relu':st==='q'?'Relu : questions en attente':'En cours de rédaction'}">${st==='done'?'✓':st==='q'?'?':'✎'}</span>`:''}</div>`}).join('');
+    const crr2=b&&inCreation(b)?crOf(b):null;const lr=crr2&&crr2.rows.get('s'+String(s.tkey).split('#')[1]);const lko=lockedByOther(lr);
+    return `<div class="fr tx ${view.rsel===s.tkey?'sel':''} ${lko?'locked':''}" ${lko?`data-lockby="${esc(lockWho(lr))}"`:''} data-act="rsel" data-tk="${esc(s.tkey)}" data-ci="${f.ci||0}" style="${frStyle(f)}${bg}${sk}" title="Clic : rédiger ce texte"><div class="tfi" style="${pad}"><div class="tfc ${vj?'vj':''}" style="${cols}${vj?`justify-content:${vj};`:''}"></div></div>${n>1?`<span class="chain" title="Texte chaîné">${(f.ci||0)+1}/${n}</span>`:''}${head&&st?`<span class="badge-st ${st}" title="${st==='done'?'Terminé et relu':st==='q'?'Relu : questions en attente':'En cours de rédaction'}">${st==='done'?'✓':st==='q'?'?':'✎'}</span>`:''}</div>`}).join('');
   const bgSrc=imgSrc(l.bg||l.img);
   return `<div class="rpage ${side}" lang="fr" style="aspect-ratio:${l.w}/${l.h}">${bgSrc?`<img class="plv-bg" src="${esc(bgSrc)}" alt="">`:''}${ph}${tx}</div>`;
 }
@@ -1309,10 +1327,13 @@ function redacPanel(b,s,stories){
   const rec=b.texts[s.tkey];const styles=(s.story&&s.story.paras)||[];const paras=rec&&rec.paras&&rec.paras.length?rec.paras:[{runs:[]}];
   const cols=Math.max(1,...s.frames.map(x=>x.f.cols||1));const n=(s.story&&s.story.n)||s.frames.length;
   const stNames=[];styles.forEach(st=>{const k=`${st.st||'Style'} · ${st.ff||''} ${st.sz||''}/${Math.round((st.ld||0)*10)/10}`;if(!stNames.includes(k))stNames.push(k)});
-  const checking=rec&&rec.st==='checking';const tpl=s.story&&s.story.paras&&s.story.paras.some(p=>(p.t||'').trim());
+  const cb=cur();const crr=cb&&inCreation(cb)?crOf(cb):null;const lrow=crr&&crr.rows.get('s'+String(s.tkey).split('#')[1]);const lockedO=lockedByOther(lrow);
+  const checking=(rec&&rec.st==='checking')||lockedO;const tpl=s.story&&s.story.paras&&s.story.paras.some(p=>(p.t||'').trim());
   const fx=(rec&&rec.fx)||[],q=(rec&&rec.q)||[];
   return `<aside class="panel rpanel" id="rpanel">
     <div class="row" style="justify-content:space-between;gap:6px"><b>Bloc texte · p. ${s.page}</b><button class="btn ghost sm" data-act="r-unsel">Tous les blocs</button></div>
+    ${lockedO?`<div class="lockbar">${I_LOCK} ${esc(lockWho(lrow))} modifie ce texte : il se met à jour ici en direct, vous pourrez écrire dès qu'il sera libre.</div>`:''}
+    ${crr&&lrow&&lrow.src==='id'&&!lrow.committed?'<p class="small muted" style="margin:0">Modifié dans InDesign, pas encore enregistré dans le document.</p>':''}
     <div class="rstyle"><span>${n>1?`chaîné sur ${n} blocs`:'1 bloc'}</span>${cols>1?`<span>${cols} colonnes</span>`:''}${stNames.slice(0,4).map(x=>`<span>${esc(x)}</span>`).join('')}</div>
     <div class="rtools" role="toolbar" aria-label="Mise en forme">
       <button data-act="rt" data-cmd="c" title="Capitales">CAP</button>
@@ -1321,7 +1342,7 @@ function redacPanel(b,s,stories){
       <button data-act="rt" data-cmd="b" title="Gras (${IS_MAC?'⌘':'Ctrl+'}B)"><b>G</b></button></div>
     <div class="red-ed" id="red-ed" contenteditable="${checking?'false':'true'}" spellcheck="true" lang="fr" data-tk="${esc(s.tkey)}" data-ph="Écrivez le texte de ce bloc…">${edHtml(paras,styles)}</div>
     <p class="small err" id="ovs-warn" ${view.ovs&&view.ovs[s.tkey]?'':'hidden'} style="margin:0">Le texte dépasse des blocs (signe + rouge) : raccourcissez-le.</p>
-    <div class="row"><button class="btn primary" data-act="red-done" data-tk="${esc(s.tkey)}" ${checking?'disabled':''}>${checking?'Relecture en cours…':"J'ai terminé"}</button>${!hasText(rec)&&tpl?`<button class="btn ghost sm" data-act="red-tpl" data-tk="${esc(s.tkey)}" title="Partir du texte présent dans la maquette">Reprendre le texte de la maquette</button>`:''}</div>
+    <div class="row"><button class="btn primary" data-act="red-done" data-tk="${esc(s.tkey)}" ${checking?'disabled':''}>${lockedO?'Texte en cours ailleurs':checking?'Relecture en cours…':"J'ai terminé"}</button>${!hasText(rec)&&tpl?`<button class="btn ghost sm" data-act="red-tpl" data-tk="${esc(s.tkey)}" title="Partir du texte présent dans la maquette">Reprendre le texte de la maquette</button>`:''}</div>
     ${rec&&rec.err?`<p class="small err" style="margin:0">${esc(rec.err)} <button class="linkish" data-act="red-done" data-tk="${esc(s.tkey)}">Relancer</button></p>`:''}
     ${rec&&rec.st==='done'&&!rec.err&&!fx.length&&!q.length?'<p class="small" style="margin:0;color:var(--ok)">✓ Relu : aucune faute trouvée.</p>':''}
     ${q.length?`<div class="fixes"><b class="small">Questions de la relecture</b>${q.map((x,i)=>`<div class="fix q"><span><del>${esc(x.avant)}</del> → <ins>${esc(x.apres||'')}</ins></span><span class="why">${esc(x.question||'')}</span><span class="row" style="gap:6px"><button class="btn sm primary" data-act="q-yes" data-tk="${esc(s.tkey)}" data-i="${i}">Corriger</button><button class="btn sm" data-act="q-no" data-tk="${esc(s.tkey)}" data-i="${i}">Garder tel quel</button></span></div>`).join('')}</div>`:''}
@@ -1345,7 +1366,7 @@ function renderRedac(b,m,ev){
   return `<div class="redac ${view.rfs?'fs':''}" id="redac"><div class="rmain">${bar}${pick}${stage}</div>${redacPanel(b,stories.find(x=>x.tkey===view.rsel)||null,stories)}</div>`;
 }
 const edState={t:null};
-function edRecord(b,tk,paras){let rec=b.texts[tk];if(!rec)rec=b.texts[tk]={paras:[],st:'draft'};rec.paras=paras;if(rec.st!=='draft'&&rec.st!=='checking'){rec.st='draft';rec.fx=[];rec.q=[];rec.err=''}return rec}
+function edRecord(b,tk,paras){let rec=b.texts[tk];if(!rec)rec=b.texts[tk]={paras:[],st:'draft'};if(!rec.st)rec.st='draft';rec.paras=paras;if(rec.st!=='draft'&&rec.st!=='checking'){rec.st='draft';rec.fx=[];rec.q=[];rec.err=''}return rec}
 function edCommand(cmd){
   const b=cur();const el=document.getElementById('red-ed');if(!b||!el)return;const tk=el.dataset.tk;const s=spreadStories(b,view.rk).find(x=>x.tkey===tk);if(!s)return;
   const sel=getSelection();let marks=[];if(sel.rangeCount){const r=sel.getRangeAt(0);if(el.contains(r.startContainer))marks=[{node:r.startContainer,off:r.startOffset},{node:r.endContainer,off:r.endOffset}]}
@@ -1384,6 +1405,147 @@ document.addEventListener('paste',e=>{const t=e.target&&e.target.closest&&e.targ
 document.addEventListener('keydown',e=>{const t=e.target;if(!t||t.id!=='red-ed')return;const mod=e.metaKey||e.ctrlKey;const k=(e.key||'').toLowerCase();
   if(mod&&k==='b'){e.preventDefault();edCommand('b')}else if(mod&&(k==='i'||k==='u')){e.preventDefault()}});
 document.addEventListener('focusout',e=>{if(e.target&&e.target.id==='red-ed'){const b=cur();if(b)save(b,true)}});
+
+/* ================= Création : le document InDesign réel, synchronisé bloc par bloc =================
+   La structure (pages, blocs, styles) vient du panneau InDesign (table creations). Chaque bloc photo et chaque texte
+   est un enregistrement (table blocks) avec une version et un verrou : le site et InDesign écrivent bloc par bloc,
+   jamais le livre entier, et une écriture sur une version périmée ou un bloc verrouillé est refusée. */
+const SID='w'+Math.random().toString(36).slice(2,10);
+const CR={byBook:new Map(),timers:new Map(),lockBid:null,lockTimer:null,lastAct:Date.now()};
+const crOf=b=>b&&CR.byBook.get(b.id);
+const inCreation=b=>{const c=crOf(b);return !!(c&&c.data&&c.data.pages&&c.data.pages.length)};
+const myId=()=>CLOUD.user&&CLOUD.user.id;
+const ownerOf=b=>(b&&b._owner)||myId();
+const isShared=b=>!!(b&&b._owner&&b._owner!==myId());
+const myName=()=>{const e=(CLOUD.user&&CLOUD.user.email)||'';const n=e.split('@')[0];return n?n.charAt(0).toUpperCase()+n.slice(1):'Quelqu\'un'};
+const crImg=(b,key)=>'cr~'+b.id+'~'+key;
+const lockedByOther=r=>!!(r&&r.lock_until&&new Date(r.lock_until).getTime()>Date.now()&&r.lock_sid!==SID);
+const lockWho=r=>r?(r.lock_client==='indesign'?`${r.lock_name||'Quelqu\'un'} dans InDesign`:`${r.lock_name||'Quelqu\'un'} sur le site`):'';
+const txData=rec=>{if(!rec)return null;const o={paras:rec.paras||[]};for(const k of ['st','fx','q','at','err'])if(rec[k]!==undefined&&rec[k]!=='')o[k]=rec[k];return o};
+// A photo path coming from InDesign may be absolute ("abs:/Users/…"): use the photo of the library with the same name
+function crLocalPath(p){if(!p)return p;if(lib.byPath.has(p))return p;const bn=baseName(String(p).replace(/^abs:/,'')).toLowerCase();const it=lib.items.find(x=>x.name.toLowerCase()===bn);return it?it.path:p}
+function applyCreation(b){
+  const c=crOf(b);if(!inCreation(b))return;const d=c.data;
+  if(!b.conception&&(b.pl.length||b.layouts.length))b.conception={pl:b.pl.filter(l=>!l.cr),pageLay:b.pageLay,spreads:b.spreads,at:Date.now()};
+  const tol=0.006;const ord=arr=>arr.slice().sort((a,z)=>Math.abs(a.y-z.y)>tol?a.y-z.y:a.x-z.x).forEach((f,j)=>f.o=j);
+  b.pl=d.pages.map(pg=>{const frames=pg.frames.map(f=>Object.assign({},f,{id:f.k==='ph'?f.bid:'t'+f.fid}));ord(frames.filter(f=>f.k==='ph'));ord(frames.filter(f=>f.k==='tx'));
+    const stories={};frames.forEach(f=>{if(f.k==='tx'&&d.stories&&d.stories[f.st])stories[f.st]=d.stories[f.st]});
+    return {id:'cr'+pg.n,src:'cr',cr:true,name:'p. '+(pg.name||pg.n),pname:pg.name,side:pg.side,w:pg.w,h:pg.h,frames,stories,img:pg.img?'cap:'+crImg(b,pg.img):'',ph:[],order:pg.n,locked:false}});
+  b.pageLay={};d.pages.forEach(pg=>b.pageLay[pg.n]='cr'+pg.n);
+  const maxP=Math.max(...d.pages.map(p=>p.n));if(maxP>b.pageCount)b.pageCount=maxP;
+  const assign={};for(const [k,arr] of Object.entries(b.assign||{})){const loose=arr.filter(a=>!a.f);if(loose.length)assign[k]=loose.slice()}
+  for(const pg of d.pages)for(const f of pg.frames){if(f.k!=='ph')continue;const r=c.rows.get(f.bid);const p=r&&!r.deleted&&r.data&&r.data.p;if(!p)continue;
+    const key=spreadKeyOf(pg.n);(assign[key]=assign[key]||[]).push({p:crLocalPath(p),d:0,s:pageSideOf(pg.n),f:f.bid})}
+  for(const k in assign)assign[k]=[...assign[k].filter(a=>photoSide(k,a)==='l'),...assign[k].filter(a=>photoSide(k,a)==='r')];
+  b.assign=assign;
+  const texts={};for(const s of allStories(b)){const r=c.rows.get('s'+s.sk.split('#')[1]);if(r&&!r.deleted&&r.data&&r.data.paras)texts[s.tkey]=clone(r.data)}
+  b.texts=texts;
+}
+// After each change on the site: send the blocks that differ from the online version (photos and texts only)
+function crPush(b){if(!inCreation(b)||!cloudOn())return;clearTimeout(CR.timers.get(b.id));CR.timers.set(b.id,setTimeout(()=>crPushNow(b.id),450))}
+async function crSave(b,bid,kind,page,data){
+  const c=crOf(b);const row=c.rows.get(bid);
+  const {data:res,error}=await CLOUD.sb.rpc('block_save',{p_owner:ownerOf(b),p_book:b.id,p_bid:bid,p_kind:kind,p_page:page,p_data:data,p_rev:row?row.rev:0,p_src:'site',p_committed:true,p_sid:SID,p_name:myName()});
+  if(error)throw error;if(res&&res.row)c.rows.set(bid,res.row);return res;
+}
+async function crPushNow(id){
+  const b=books.get(id);if(!inCreation(b)||!cloudOn())return;const c=crOf(b);const d=c.data;let refused=null;
+  try{
+    for(const pg of d.pages)for(const f of pg.frames){if(f.k!=='ph')continue;
+      const e=(b.assign[spreadKeyOf(pg.n)]||[]).find(a=>a.f===f.bid);const want=e?e.p:null;const r=c.rows.get(f.bid);const have=r&&!r.deleted&&r.data?r.data.p:null;
+      if((want||null)===(have||null)||(want&&have&&crLocalPath(have)===want))continue;
+      const res=await crSave(b,f.bid,'ph',pg.n,{p:want,ln:want?baseName(want):null});if(!res.ok)refused=refused||{res,bid:f.bid}}
+    for(const s of allStories(b)){const bid='s'+s.sk.split('#')[1];const rec=b.texts[s.tkey];if(!rec)continue;const r=c.rows.get(bid);
+      const want=txData(rec);const have=r&&r.data?txData(r.data):null;if(JSON.stringify(want)===JSON.stringify(have))continue;
+      const res=await crSave(b,bid,'tx',s.page,want);if(!res.ok)refused=refused||{res,bid,tkey:s.tkey,mine:want}}
+  }catch(e){setSaved('Envoi impossible · nouvel essai');clearTimeout(CR.timers.get(id));CR.timers.set(id,setTimeout(()=>crPushNow(id),8000));return}
+  if(refused){const r=refused.res;
+    if(r.reason==='locked'){toast(`Ce bloc est en cours de modification par ${lockWho(r.row)} : votre changement n'a pas été envoyé.`);applyCreation(b);baseline(b);render()}
+    else if(r.reason==='rev'&&refused.mine)openReconcile(b,refused.bid,refused.mine);
+    else{applyCreation(b);baseline(b);render()}}
+  cloudStatus();
+}
+// Text changed elsewhere while it was being written here: choose a version (or keep both)
+function openReconcile(b,bid,mine){
+  const r=crOf(b).rows.get(bid);const theirs=r&&r.data?txData(r.data):{paras:[]};const pt=x=>(x.paras||[]).map(plainOf).join('\n');
+  view.recon={book:b.id,bid,mine,theirs};
+  showModal(`<h3>Ce texte a changé ailleurs pendant que vous écriviez</h3>
+    <p class="small muted" style="margin:0">Modifié par ${esc(r&&r.by_name||'quelqu\'un')}${r&&r.src==='id'?' dans InDesign':' sur le site'}. Choisissez la version à garder.</p>
+    <div class="recon"><div><b class="small">Votre version</b><pre>${esc(pt(mine))}</pre></div><div><b class="small">L'autre version</b><pre>${esc(pt(theirs))}</pre></div></div>
+    <div class="row"><button class="btn primary" data-act="rc-mine">Garder la mienne</button><button class="btn" data-act="rc-theirs">Prendre l'autre</button><button class="btn" data-act="rc-both">Garder les deux (la mienne en dessous)</button></div>`,'wide');
+}
+async function resolveReconcile(how){
+  const rc=view.recon;view.recon=null;closeOverlay();if(!rc)return;const b=books.get(rc.book);if(!b)return;const c=crOf(b);const r=c.rows.get(rc.bid);
+  if(how==='theirs'){applyCreation(b);baseline(b);render();return}
+  const data=how==='mine'?rc.mine:{paras:[...(rc.theirs.paras||[]),...(rc.mine.paras||[])]};
+  const res=await crSave(b,rc.bid,'tx',r&&r.page,data);
+  if(!res.ok){toast(res.reason==='locked'?`Bloc verrouillé par ${lockWho(res.row)} : réessayez quand il aura fini.`:'Le texte a encore changé : réessayez.');}
+  applyCreation(b);baseline(b);render();
+}
+// Text block locks: taken while a text is open in Rédaction, renewed every 20 s, released when leaving it
+async function crLock(b,bid){
+  if(CR.lockBid&&CR.lockBid!==bid)crUnlock(b);if(!bid||!cloudOn())return;CR.lockBid=bid;
+  const go=async()=>{try{const {data}=await CLOUD.sb.rpc('block_lock',{p_owner:ownerOf(b),p_book:b.id,p_bid:bid,p_sid:SID,p_name:myName(),p_client:'site',p_ttl:60});if(data&&data.row)crOf(b).rows.set(bid,data.row);if(data&&!data.ok)softRender()}catch(e){}};
+  await go();clearInterval(CR.lockTimer);CR.lockTimer=setInterval(go,20000);
+}
+function crUnlock(b){clearInterval(CR.lockTimer);const bid=CR.lockBid;CR.lockBid=null;if(!bid||!b||!cloudOn())return;CLOUD.sb.rpc('block_unlock',{p_owner:ownerOf(b),p_book:b.id,p_sid:SID,p_bid:bid}).then(()=>{},()=>{})}
+window.addEventListener('beforeunload',()=>{const b=view.route==='livre'&&books.get(view.id);if(b&&CR.lockBid)crUnlock(b)});
+// Presence: every open tab and InDesign panel sends a signal every 20 s (table book_presence); a signal older than 60 s is ignored
+CR.pres=new Map();CR.presKey='';CR.presTimer=null;
+function crPresence(){
+  const b=view.route==='livre'?books.get(view.id):null;const key=b&&inCreation(b)&&cloudOn()?ownerOf(b)+'|'+b.id:'';
+  if(key===CR.presKey)return;
+  if(CR.presKey)crLeave();CR.presKey=key;CR.pres=new Map();clearInterval(CR.presTimer);if(!key)return;
+  crTrack();CR.presTimer=setInterval(crTrack,20000);
+  const [o,bid]=key.split('|');selectWhere('book_presence','*',{owner:o,book_id:bid}).then(rows=>{rows.forEach(r=>CR.pres.set(r.sid,r));renderPresence()}).catch(()=>{});
+}
+function crTrack(){if(!CR.presKey||!cloudOn())return;const [o,bid]=CR.presKey.split('|');const active=Date.now()-CR.lastAct<120000;
+  CLOUD.sb.from('book_presence').upsert({owner:o,book_id:bid,sid:SID,client:'site',name:myName(),active,bid:CR.lockBid||null,seen_at:new Date().toISOString()}).then(()=>{},()=>{})}
+function crLeave(){if(!CR.presKey||!cloudOn())return;const [o,bid]=CR.presKey.split('|');CLOUD.sb.from('book_presence').delete().eq('owner',o).eq('book_id',bid).eq('sid',SID).then(()=>{},()=>{})}
+window.addEventListener('pagehide',crLeave);
+function crOnPresence(pl){const r=pl.new&&pl.new.sid?pl.new:pl.old;if(!r||!CR.presKey)return;if(r.owner+'|'+r.book_id!==CR.presKey)return;if(pl.eventType==='DELETE')CR.pres.delete(r.sid);else CR.pres.set(r.sid,pl.new);renderPresence()}
+['pointerdown','keydown'].forEach(t=>document.addEventListener(t,()=>{const was=Date.now()-CR.lastAct<120000;CR.lastAct=Date.now();if(!was)crTrack()},true));
+setInterval(renderPresence,15000);
+function presenceHtml(){
+  const ps=[...CR.pres.values()].filter(p=>p.sid!==SID&&Date.now()-new Date(p.seen_at).getTime()<60000);if(!ps.length)return '';
+  return ps.map(p=>`<span class="pres ${p.client==='indesign'?'id':''} ${p.active?'':'idle'}"><i></i>${esc(p.name||'Quelqu\'un')} ${p.client==='indesign'?`édite dans InDesign${p.doc?' · '+esc(p.doc):''}${p.page?' · p. '+esc(p.page):''}`:'est sur le site'}${p.active?'':' (inactif)'}</span>`).join('');
+}
+function renderPresence(){const el=document.getElementById('presence-slot');if(el)el.innerHTML=presenceHtml()}
+// Loading: structure, blocks and page previews of the books in creation
+async function selectWhere(table,cols,eq){const out=[];for(let from=0;;from+=500){let q=CLOUD.sb.from(table).select(cols);for(const [k,v] of Object.entries(eq))q=q.eq(k,v);const {data,error}=await q.range(from,from+499);if(error)throw error;out.push(...data);if(data.length<500)break}return out}
+async function crLoadAll(){
+  let rows=[];try{rows=await selectAll('creations','owner,book_id,data,rev,updated_at')}catch(e){return}
+  for(const r of rows)await crTake(r);
+}
+async function crTake(r){
+  const b=books.get(r.book_id);if(!b)return;const old=CR.byBook.get(b.id);
+  const c={owner:r.owner,data:r.data,rev:r.rev,rows:old?old.rows:new Map()};CR.byBook.set(b.id,c);
+  if(!old){try{(await selectWhere('blocks','*',{owner:r.owner,book_id:r.book_id})).forEach(x=>c.rows.set(x.bid,x))}catch(e){}}
+  const need=(r.data.pages||[]).map(p=>p.img).filter(k=>k&&!captures[crImg(b,k)]);
+  if(need.length){try{(await selectWhere('creation_images','key,data',{owner:r.owner,book_id:r.book_id})).forEach(x=>{captures[crImg(b,x.key)]=x.data})}catch(e){}}
+  applyCreation(b);baseline(b);
+}
+function crOnBlock(pl){
+  const r=pl.new;if(!r||!r.book_id)return;const b=books.get(r.book_id);const c=crOf(b);if(!c||r.owner!==c.owner)return;
+  const prev=c.rows.get(r.bid);if(prev&&prev.rev>r.rev)return;c.rows.set(r.bid,r);
+  const editing=view.rsel&&document.activeElement&&document.activeElement.id==='red-ed'&&r.bid==='s'+String(view.rsel).split('#')[1];
+  const contentChanged=!prev||prev.rev!==r.rev;
+  if(contentChanged&&!editing){applyCreation(b);baseline(b);if(IDB.ok)idbPut('book:'+b.id,clone(b)).catch(()=>{})}
+  if(view.route==='livre'&&view.id===b.id)softRender();
+}
+// Sharing a book with another account (by e-mail)
+async function openShare(b){
+  view.share={book:b.id,list:null,err:''};renderShare();
+  try{const {data,error}=await CLOUD.sb.from('book_shares').select('email,created_at').eq('owner',myId()).eq('book_id',b.id);if(error)throw error;view.share.list=data}catch(e){view.share.err="Le partage n'est pas encore installé dans Supabase (script supabase-creation.sql)."}
+  renderShare();
+}
+function renderShare(){const s=view.share;if(!s)return;const b=books.get(s.book);
+  showModal(`<div class="row" style="justify-content:space-between"><h3>Partager « ${esc(b.title)} »</h3><button class="btn ghost sm" data-act="close-overlay">Fermer</button></div>
+    <p class="small muted" style="margin:0">La personne invitée crée son propre compte moodbook avec cette adresse e-mail : le livre apparaît alors dans sa liste. Elle peut rédiger les textes et voir l'avancement ; vous voyez quand elle est sur le livre.</p>
+    ${s.err?`<p class="err">${esc(s.err)}</p>`:''}
+    ${s.list?`<div class="share-list">${s.list.map(x=>`<div class="row"><span>${esc(x.email)}</span><span style="flex:1"></span><button class="btn ghost sm danger" data-act="share-del" data-email="${esc(x.email)}">Retirer</button></div>`).join('')||'<p class="small muted">Ce livre n\'est partagé avec personne.</p>'}</div>`:'<p class="small muted">Chargement…</p>'}
+    <form class="row" id="share-form"><input class="f" id="share-email" type="email" placeholder="Adresse e-mail" style="flex:1"><button class="btn primary" type="submit">Inviter</button></form>`);
+}
 
 /* ================= import des événements ================= */
 const XLSX_URL='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
@@ -1605,6 +1767,11 @@ document.addEventListener('click',async ev=>{
     case 'empty-blocks':{const key=t.dataset.key,side=t.dataset.side;(b.assign[key]||[]).forEach(a=>{if(photoSide(key,a)===side)delete a.f});save(b);break}
     case 'mep-settings':view.mepSettings=true;render();break;
     case 'legacy-del':{ev.preventDefault();if(view.armed!=='legacy'){arm('legacy');break}view.armed=null;remember(b);const n=b.layouts.length;b.layouts=[];b.spreads={};save(b);toastUndo(`${n} anciennes mises en page supprimées`);break}
+    case 'share':openShare(b);break;
+    case 'share-del':{const em=t.dataset.email;try{await CLOUD.sb.from('book_shares').delete().eq('owner',myId()).eq('book_id',view.share.book).eq('email',em);view.share.list=view.share.list.filter(x=>x.email!==em)}catch(e){toast('Retrait impossible pour le moment.')}renderShare();break}
+    case 'rc-mine':resolveReconcile('mine');break;
+    case 'rc-theirs':resolveReconcile('theirs');break;
+    case 'rc-both':resolveReconcile('both');break;
     case 'pl-lock':{const l=b.pl.find(x=>x.id===t.dataset.pl);if(l){l.locked=!l.locked;save(b)}break}
     case 'pl-del':{const id=t.dataset.pl;if(view.armed==='pl:'+id){view.armed=null;remember(b);b.pl=b.pl.filter(l=>l.id!==id);for(const k in b.pageLay)if(b.pageLay[k]===id)delete b.pageLay[k];save(b);toastUndo('Mise en page supprimée')}else arm('pl:'+id);break}
     case 'mep-src-del':{const src=t.dataset.src;if(view.armed==='src:'+src){view.armed=null;remember(b);const ids=new Set(b.pl.filter(l=>l.src===src).map(l=>l.id));b.pl=b.pl.filter(l=>!ids.has(l.id));for(const k in b.pageLay)if(ids.has(b.pageLay[k]))delete b.pageLay[k];if(b.mepSrc)delete b.mepSrc[src];save(b);toastUndo(`« ${src} » retiré du livre`)}else arm('src:'+src);break}
@@ -1881,6 +2048,8 @@ document.addEventListener('submit',e=>{
       if(r.error){view.cloudMsg=/invalid login/i.test(r.error.message)?'E-mail ou mot de passe incorrect.':/already registered/i.test(r.error.message)?'Ce compte existe déjà : utilisez « Se connecter ».':/confirm/i.test(r.error.message)?'Confirmez d\'abord votre adresse avec le lien reçu par e-mail.':r.error.message;view.cloudErr=true}
       else if(m==='up'&&!r.data.session){view.cloudMsg='Compte créé : cliquez sur le lien reçu par e-mail, puis connectez-vous.';view.cloudErr=false}
       else{view.cloudMsg='';view.cloudErr=false}render()})();return}
+  if(f.id==='share-form'){const em=document.getElementById('share-email').value.trim().toLowerCase();if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){view.share.err='Adresse e-mail invalide.';renderShare();return}
+    (async()=>{const {error}=await CLOUD.sb.from('book_shares').insert({book_id:view.share.book,email:em});if(error&&!/duplicate/i.test(error.message)){view.share.err="Invitation impossible : "+error.message}else{view.share.err='';view.share.list=[...(view.share.list||[]).filter(x=>x.email!==em),{email:em}]}renderShare()})();return}
   if(f.id==='ver-form'){const bk=books.get(view.id);if(!bk)return;const name=document.getElementById('ver-name').value.trim()||'Version manuelle';addVersion(bk.id,strip(bk),name,false);toast('Version enregistrée');return}
   if(f.id==='newbook'){const title=document.getElementById('nb-title').value.trim();const pages=parseInt(document.getElementById('nb-pages').value)||0;const year=document.getElementById('nb-year').value;
     view.newDraft={title,pages:document.getElementById('nb-pages').value,year};

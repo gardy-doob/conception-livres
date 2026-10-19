@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { margin: 0; padding: 10px; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 12px; color: var(--uxp-host-text-color, #e8e8e8); background: var(--uxp-host-background-color, #323232); }
+  h1 { font-size: 14px; margin: 0 0 8px; display: flex; align-items: center; gap: 6px; }
+  h1 i { display: inline-block; width: 8px; height: 11px; border: 1.5px solid currentColor; border-radius: 2px; }
+  h1 i + i { background: #B0275C; border-color: #B0275C; margin-left: -4px; }
+  .muted { opacity: .7; }
+  .box { border: 1px solid rgba(128,128,128,.4); border-radius: 6px; padding: 8px; margin: 8px 0; }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  input, select { width: 100%; box-sizing: border-box; padding: 5px 6px; margin: 3px 0; font-size: 12px; }
+  button { padding: 5px 10px; font-size: 12px; cursor: pointer; border-radius: 4px; border: 1px solid rgba(128,128,128,.6); background: transparent; color: inherit; }
+  button.primary { background: #B0275C; border-color: #B0275C; color: #fff; }
+  button.sm { padding: 2px 7px; font-size: 11px; }
+  .status { font-weight: 600; }
+  .live { color: #53C3DD; } .calm { color: #9fd3a8; } .err { color: #ff8a80; }
+  .pres { display: flex; gap: 6px; align-items: center; margin: 2px 0; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #7CCB98; flex: none; }
+  .dot.idle { background: #888; }
+  .conf { border: 1px solid #F2B657; border-radius: 6px; padding: 6px; margin: 6px 0; }
+  .conf pre { white-space: pre-wrap; margin: 3px 0; max-height: 80px; overflow: auto; font: inherit; background: rgba(128,128,128,.15); padding: 4px; border-radius: 3px; }
+  .log { max-height: 180px; overflow: auto; }
+  .log div { padding: 2px 0; border-bottom: 1px solid rgba(128,128,128,.15); }
+  .log b { font-weight: 400; opacity: .6; margin-right: 4px; }
+</style>
+</head>
+<body>
+  <h1><i></i><i></i> moodbook</h1>
+  <div id="app"><p class="muted">Chargement…</p></div>
+  <script src="config.js"></script>
+  <script src="engine.js"></script>
+  <script src="api.js"></script>
+  <script src="dom.js"></script>
+  <script src="panel.js"></script>
+</body>
+</html>

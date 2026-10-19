@@ -546,6 +546,23 @@ body.has-pool .trash{bottom:calc(60px + env(safe-area-inset-bottom,0px))}
 .kc.warn{border-color:var(--doing)}.kc.warn .kc-v{color:var(--doing)}
 .kc.bad{border-color:var(--bad);background:var(--bad-bg)}.kc.bad .kc-l,.kc.bad .kc-s{color:var(--bad)}
 .cdf-tools{position:static!important;box-shadow:none!important}
+.presence{display:flex;gap:6px;flex-wrap:wrap;margin:-4px 0 10px}.presence:empty{display:none}
+.pres{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:3px 10px;font-size:12px;font-weight:500}
+.pres i{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px var(--ok-bg)}
+.pres.id{border-color:var(--cyan)}.pres.id i{background:var(--cyan);box-shadow:0 0 0 3px color-mix(in srgb,var(--cyan) 20%,transparent)}
+.pres.idle{opacity:.6}.pres.idle i{background:var(--muted);box-shadow:none}
+.shared-tag,.cr-tag{text-transform:none;letter-spacing:0;font-weight:600;color:var(--cyan)}
+.cr-tag{color:var(--ok)}
+.sync-chip{display:inline-flex;align-items:center;font-size:12px;font-weight:600;color:var(--ok);background:var(--ok-bg);border-radius:999px;padding:4px 10px;white-space:nowrap}
+.tgrp.done{opacity:.75}.tgrp.done .tgn{background:var(--ok)}
+.fr.ph.locked{outline:2px solid var(--cyan);outline-offset:-2px;cursor:not-allowed}
+.fr.ph.locked .lk{position:absolute;right:3px;top:3px;background:var(--cyan);color:#fff;border-radius:3px;padding:1px 3px;line-height:0;z-index:2}
+.fr.ph.cr-keep{background:transparent;cursor:copy}.fr.ph.cr-keep:hover{outline:2px dashed var(--accent);outline-offset:-2px}
+.fr.tx.locked{outline:2px solid var(--cyan);outline-offset:1px;cursor:not-allowed}
+.fr.tx.locked::after{content:"🔒 " attr(data-lockby);position:absolute;left:0;top:-16px;font:600 10px/1.4 var(--f-body);color:#fff;background:var(--cyan);padding:0 5px;border-radius:3px;white-space:nowrap;z-index:4}
+.lockbar{border:1px solid var(--cyan);background:color-mix(in srgb,var(--cyan) 10%,transparent);color:var(--ink);border-radius:6px;padding:7px 9px;font-size:12px;display:flex;gap:6px;align-items:flex-start}
+.recon{display:grid;grid-template-columns:1fr 1fr;gap:10px}.recon pre{white-space:pre-wrap;font:13px/1.45 var(--f-body);background:var(--sunk);border-radius:6px;padding:8px;max-height:300px;overflow:auto;margin:4px 0 0}
+.share-list{display:grid;gap:4px}
 /* v18: page layouts from the MEP files, photo blocks, writing */
 .plv{position:relative;container-type:inline-size;background:#fff;isolation:isolate;box-shadow:0 0 0 1px var(--line);width:100%}
 .plv>img.plv-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;display:block;pointer-events:none}

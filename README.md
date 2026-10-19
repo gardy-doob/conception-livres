@@ -28,3 +28,12 @@ l'application) et versement des textes rédigés, sans toucher à la mise en for
 - Relecture des textes : fonction `supabase/functions/relecture` (Edge Function « relecture ») avec le secret
   `ANTHROPIC_API_KEY`. Facultatif : `RELECTURE_EMAILS` (adresses autorisées, séparées par des virgules),
   `RELECTURE_MODEL` (modèle Claude, par défaut claude-haiku-5-5).
+
+## Phase Création : synchronisation avec InDesign
+- Base : lancer aussi `supabase-creation.sql` (partage des livres, blocs, verrous, présence).
+- Panneau InDesign : `indesign/moodbook.ccx` (double-clic pour l'installer, InDesign 2023 ou plus récent), sources dans `indesign/plugin/`.
+- « Passer en création » (dans le panneau, document final ouvert) envoie pages, blocs photo et textes ; la conception est alors terminée.
+- Chaque bloc a une version et un verrou ; synchronisation en direct seulement quand quelqu'un d'autre est actif sur le livre,
+  sinon à l'enregistrement. Fermeture sans enregistrer ou plantage : les modifications InDesign non enregistrées sont annulées en ligne
+  et celles du site réappliquées au document.
+- Partage d'un livre avec un autre compte : bouton « Partager » dans l'en-tête du livre.
