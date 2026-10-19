@@ -550,6 +550,8 @@ body.has-pool .trash{bottom:calc(60px + env(safe-area-inset-bottom,0px))}
 .pp-h.same{background:var(--sunk)}
 .pp-h.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
 .pp-h:disabled{opacity:.35;cursor:not-allowed}
+.pp-h.near{background:var(--doing-bg);border-color:var(--doing)}
+.nearw{color:var(--doing);font-weight:700}
 .pp-h.none{visibility:hidden}
 .pp-all{border:1px dashed var(--line);background:none;border-radius:4px;font-size:10px;cursor:pointer;color:var(--ink);padding:2px}
 .pp-all:hover{border-color:var(--accent);color:var(--accent)}

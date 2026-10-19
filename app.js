@@ -884,7 +884,7 @@ function renderPhotos(b,m,ev){
       <div class="psr-h" data-act="activate" data-key="${s.key}"><span class="lbl" data-drop="plmove" data-pl="${plancheNo(s.key)}" title="${esc(spreadLabel(b,s.key))} · déposez un événement ici pour le déplacer sur cette planche">Pl. ${plancheNo(s.key)}</span>
         <div class="evcs">${evs.map(e=>`<div class="evc" data-drop="evmerge" data-ev="${esc(e.id)}" style="--h:${e.hue}"><span class="grip" draggable="true" data-drag="evmove" data-ev="${esc(e.id)}" title="Glisser sur un autre événement pour fusionner, sur un n° de planche pour déplacer, sur la corbeille pour désassigner" aria-label="Déplacer l'événement">⋮⋮</span><textarea class="evname" rows="1" id="psn-${s.key}-${esc(e.id)}" data-act="ev-name" data-ev="${esc(e.id)}" aria-label="Texte de l'événement">${esc(e.name)}</textarea>${sidePicto(b,e,s.key)}</div>`).join('')||'<span class="small muted">Sans événement</span>'}</div>
         <span class="cnt ${cls}" title="Photos placées / ${PL?'blocs photo des mises en page':'places dans '+(l?esc(l.name):'la mise en page')}">${arr.length}/${cap||'–'}</span></div>
-      <div class="psr-b2 ${s.key===0?'single':''} ${arr.length||lps.some(Boolean)?'':'empty'}">${(s.key===0?['r']:['l','r']).map(side=>{
+      <div class="psr-b2 ${s.key===0?'single':''} ${arr.length||PL?'':'empty'}">${(s.key===0?['r']:['l','r']).map(side=>{
         const list=arr.map((a,i)=>({a,i})).filter(x=>photoSide(s.key,x.a)===side);const pg=side==='l'?s.l:s.r;const lp=PL&&pg?plm[b.pageLay[pg]]:null;
         let inner,F=null;if(lp){F=pageFill(lp,list);const freeB=F.frs.length-F.map.size;
           inner=`<div class="pz-mep">${plBlocks(lp,F,s.key,side)}</div>${F.extra.length?`<div class="pz-extra"><span class="pz-l">À placer (${F.extra.length}) :</span>${F.extra.map(({a,i})=>athumbHtml(s.key,a,i)).join('')}${freeB?`<button class="pz-btn" data-act="fill-blocks" data-key="${s.key}" data-side="${side}" title="Pose ces photos dans les blocs vides de cette page, dans l'ordre">Remplir les ${Math.min(freeB,F.extra.length)} bloc${Math.min(freeB,F.extra.length)>1?'s':''} vide${Math.min(freeB,F.extra.length)>1?'s':''}</button>`:''}</div>`:''}`}
@@ -1039,8 +1039,8 @@ function plBlocks(l,F,key,side){
 }
 function plPicker(b,page){
   const u=plUsage(b);const cur_=b.pageLay[page];const side=pageSideOf(page);const key=spreadKeyOf(page);const srcs=[...new Set(b.pl.map(l=>l.src))];
-  const half=l=>{if(!l)return '<span class="pp-h none"></span>';const n=(u[l.id]||[]).length;const full=n>=b.maxReuse&&l.id!==cur_;
-    return `<button class="pp-h ${l.id===cur_?'on':''} ${l.side===side?'same':''}" data-act="pl-set" data-page="${page}" data-pl="${esc(l.id)}" ${full?`disabled title="Déjà utilisée ${n} fois"`:`title="${esc(l.name)} · ${plPhotos(l)} photo(s) · ${n}/${b.maxReuse} · poser sur la page ${page}"`}>${plThumb(l)}<span class="mono">${n}/${b.maxReuse}</span></button>`};
+  const half=l=>{if(!l)return '<span class="pp-h none"></span>';const n=(u[l.id]||[]).length;const full=n>=b.maxReuse&&l.id!==cur_;const near=l.id===cur_?[]:nearUses(b,l.id,page);
+    return `<button class="pp-h ${l.id===cur_?'on':''} ${l.side===side?'same':''} ${near.length?'near':''}" data-act="pl-set" data-page="${page}" data-pl="${esc(l.id)}" ${full?`disabled title="Déjà utilisée ${n} fois"`:`title="${esc(l.name)} · ${plPhotos(l)} photo(s) · ${n}/${b.maxReuse}${near.length?` · ⚠ déjà utilisée en Pl. ${near.join(', ')}, moins de 2 planches d'écart`:''} · poser sur la page ${page}"`}>${plThumb(l)}<span class="mono">${near.length?`<b class="nearw">⚠ Pl. ${near.join(',')}</b> `:''}${n}/${b.maxReuse}</span></button>`};
   return `<div class="plpick panel" role="dialog" aria-label="Mise en page de la page ${page}"><div class="small"><b>Page ${page}</b> <span class="muted">(${side==='l'?'gauche':'droite'}) · cliquez une page pour la poser seule, ou prenez la planche entière</span></div>
     <div class="plpick-grid pp-grid">${srcs.map(src=>(srcs.length>1?`<h5>${esc(src)}</h5>`:'')+plPairs(b,src).map((g,i)=>`<div class="pp"><div class="pp-sp">${half(g.l)}${half(g.r)}</div><button class="pp-all" data-act="pl-pair-set" data-key="${key}" data-k="${esc(g.k)}" title="Poser la gauche et la droite de cette planche sur la planche ${plancheNo(key)}">Planche ${i+1} entière</button></div>`).join('')).join('')||'<p class="small muted">Aucune mise en page : importez un export MEP dans l\'onglet Mises en page.</p>'}</div>
     ${cur_?`<button class="btn ghost sm" data-act="pl-set" data-page="${page}" data-pl="">Retirer la mise en page de la page ${page}</button>`:''}</div>`;
@@ -1052,12 +1052,17 @@ function plPairs(b,src,withGone){
     const k=l.src+'#'+(l.sp!=null?l.sp:'o'+l.order);if(!m.has(k))m.set(k,{k,src:l.src,l:null,r:null});const g=m.get(k);
     if(l.side==='l'&&!g.l)g.l=l;else if(!g.r)g.r=l;else if(!g.l)g.l=l}
   return [...m.values()]}
+// Planches (2 before or after, same planche included) where a layout is already used near a page
+function nearUses(b,lid,page){const P=plancheNo(spreadKeyOf(page));return [...new Set((plUsage(b)[lid]||[]).filter(p=>p!==page&&Math.abs(plancheNo(spreadKeyOf(p))-P)<=2).map(p=>plancheNo(spreadKeyOf(p))))].sort((a,z)=>a-z)}
+function nearWarn(b,jobs){ // jobs: [[page, layout]] just set
+  const msgs=[];for(const [p,l] of jobs){if(!p||!l)continue;const near=nearUses(b,l.id,p).filter(n=>!jobs.some(([q,m])=>m&&m.id===l.id&&q!==p&&plancheNo(spreadKeyOf(q))===n&&n===plancheNo(spreadKeyOf(p))));if(near.length)msgs.push(`« ${l.name} » déjà utilisée en Pl. ${near.join(', ')}`)}
+  if(msgs.length)toastUndo(`Attention : ${msgs.join(' · ')} (moins de 2 planches d'écart)`);}
 function setPair(b,key,g){
   const u=plUsage(b);const s=spreadsOf(b.pageCount).find(x=>x.key===+key);if(!s||!g)return;
   const jobs=+key===0?[[s.r,g.r||g.l]]:[[s.l,g.l],[s.r,g.r]];
   for(const [p,l] of jobs){if(!p||!l)continue;const n=(u[l.id]||[]).filter(x=>x!==p).length;if(n>=b.maxReuse){toast(`Limite atteinte : « ${l.name} » est déjà utilisée ${n} fois.`);return}}
-  for(const [p,l] of jobs){if(!p)continue;if(l)b.pageLay[p]=l.id;else delete b.pageLay[p]}
-  save(b);
+  remember(b);for(const [p,l] of jobs){if(!p)continue;if(l)b.pageLay[p]=l.id;else delete b.pageLay[p]}
+  save(b);nearWarn(b,jobs);
 }
 function autoAssignPL(b){
   const u=plUsage(b),max=b.maxReuse;const cnt={};b.pl.forEach(l=>cnt[l.id]=(u[l.id]||[]).length);
@@ -1559,8 +1564,8 @@ document.addEventListener('click',async ev=>{
       b.pages[other]=id;view.edit=null;save(b);break}
     case 'pe-free':{const p=+t.dataset.page;remember(b);delete b.pages[p];dropOrphans(b);view.edit=null;save(b);toastUndo('Page libérée');break}
     case 'lpick':{const k=+t.dataset.key;view.lpick=view.lpick===k?null:k;render();break}
-    case 'plpick':case 'r-plpick':{ev.stopPropagation();const p=+t.dataset.page;view.plpick=view.plpick===p?null:p;render();break}
-    case 'pl-set':{const p=+t.dataset.page,id=t.dataset.pl;if(id){const n=(plUsage(b)[id]||[]).filter(x=>x!==p).length;if(n>=b.maxReuse){toast(`Limite atteinte : cette mise en page est déjà utilisée ${n} fois.`);break}b.pageLay[p]=id}else delete b.pageLay[p];view.plpick=null;save(b);break}
+    case 'plpick':case 'r-plpick':{ev.stopPropagation();const p=+t.dataset.page;view.plpick=view.plpick===p?null:p;render();document.querySelector('.plpick')?.scrollIntoView({block:'nearest',behavior:'smooth'});break}
+    case 'pl-set':{const p=+t.dataset.page,id=t.dataset.pl;if(id){const n=(plUsage(b)[id]||[]).filter(x=>x!==p).length;if(n>=b.maxReuse){toast(`Limite atteinte : cette mise en page est déjà utilisée ${n} fois.`);break}remember(b);b.pageLay[p]=id}else delete b.pageLay[p];view.plpick=null;save(b);if(id)nearWarn(b,[[p,plById(b)[id]]]);break}
     case 'pl-pair-set':{const g=plPairs(b).find(x=>x.k===t.dataset.k);view.plpick=null;setPair(b,+t.dataset.key,g);break}
     case 'fill-blocks':{const key=t.dataset.key,side=t.dataset.side;const l=plById(b)[b.pageLay[pageOfSide(key,side)]];if(!l)break;const F=pageFill(l,sideEntries(b,key,side));
       const free=F.frs.filter(f=>!F.map.has(f.id));let k=0;for(const e of F.extra){if(k>=free.length)break;e.a.f=free[k++].id}save(b);toast(k?`${k} photo${k>1?'s':''} posée${k>1?'s':''} dans les blocs vides`:'Aucun bloc vide');break}
