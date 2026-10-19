@@ -601,6 +601,11 @@ body.has-pool .trash{bottom:calc(60px + env(safe-area-inset-bottom,0px))}
 .mepgrp{margin-bottom:18px}
 .mepgrp-h{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:8px}
 .mepgrp-h h3{font-size:16px}
+.mepgrp-h .icon-btn{align-self:center}
+.modal.mepset{max-width:1000px}
+.modal.mepset .calc,.modal.mepset .lay-actions,.modal.mepset .mepdrop{margin-bottom:0}
+details.legacy>summary{display:flex;align-items:center;gap:10px}
+details.legacy>summary .btn{margin-left:4px}
 .mepdrop{border:2px dashed var(--line);border-radius:var(--r);padding:14px;text-align:center;color:var(--muted);margin-bottom:14px;font-size:13px}
 .mepdrop.over{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
 .steps{display:grid;gap:8px;text-align:left;max-width:640px;margin:0 auto;padding:0;list-style:none;counter-reset:st}

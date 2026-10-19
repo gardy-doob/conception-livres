@@ -11,6 +11,7 @@ const BROWSER_IMG=/\.(jpe?g|png|webp|gif)$/i;
 const I_LOCK='<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="3" y="7" width="10" height="7.5" rx="1.5" fill="currentColor"/><path d="M5.2 7V5.2a2.8 2.8 0 0 1 5.6 0V7" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
 const I_UNLOCK='<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="3" y="7" width="10" height="7.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5.2 7V5.2a2.8 2.8 0 0 1 5.4-1" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
 const I_TRASH='<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 9h5.8l.6-9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>';
+const I_GEAR='<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><circle cx="8" cy="8" r="2.3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M6.9 1.5h2.2l.4 1.8 1.2.6 1.6-1 1.5 1.5-1 1.6.5 1.2 1.9.4v2.2l-1.9.4-.5 1.2 1 1.6-1.5 1.5-1.6-1-1.2.5-.4 1.9H6.9l-.4-1.9-1.2-.5-1.6 1-1.5-1.5 1-1.6-.5-1.2-1.8-.4V6.9l1.8-.4.5-1.2-1-1.6 1.5-1.5 1.6 1 1.2-.6z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>';
 const I_FOLDER='<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M1.5 4a1 1 0 0 1 1-1h3.6l1.4 1.5h5.9a1 1 0 0 1 1 1v6.8a1 1 0 0 1-1 1h-10.9a1 1 0 0 1-1-1z" fill="currentColor" opacity=".8"/></svg>';
 
 /* ================= state ================= */
@@ -487,7 +488,7 @@ async function offerFile(filename,data,fallbackText,fallbackName){
   showModal(`<h3>Téléchargement indisponible ici</h3><p class="muted small">Copiez le texte ci-dessous et enregistrez-le dans un fichier nommé <b>${esc(fallbackName||filename)}</b>.</p><textarea readonly id="fallback-text">${esc(fallbackText||'')}</textarea><div class="row"><button class="btn primary" data-act="copy-fallback">Copier</button><button class="btn" data-act="close-overlay">Fermer</button></div>`);
 }
 function showModal(html,cls){document.getElementById('overlay').innerHTML=`<div class="overlay" data-act="overlay-bg"><div class="modal ${cls||''}" role="dialog" aria-modal="true">${html}</div></div>`}
-function closeOverlay(){document.getElementById('overlay').innerHTML='';if(lightbox&&lightbox.url)URL.revokeObjectURL(lightbox.url);lightbox=null}
+function closeOverlay(){view.mepSettings=false;document.getElementById('overlay').innerHTML='';if(lightbox&&lightbox.url)URL.revokeObjectURL(lightbox.url);lightbox=null}
 
 /* ================= photo library (EXIF) ================= */
 function parseTiff(v,t){
@@ -625,6 +626,7 @@ function render(){
   for(const [id,k] of [['pb-scroll','pb'],['ps-scroll','ps'],['tray-list','tr']]){const el=document.getElementById(id);if(el&&keep[k]!=null)el.scrollTop=keep[k]}
   document.documentElement.style.setProperty('--toph',headerH()+'px');observeTiles();renderSelbar();renderPool();if(loaded)saveUI();maybeReopenDir();
   if(view.route==='livre'&&view.tab==='redac')flowAll();
+  if(view.mepSettings){if(view.route==='livre'&&view.tab==='layouts'&&view._mepSet){const sc=document.querySelector('#overlay .modal')?.scrollTop;showModal(view._mepSet,'wide mepset');const md=document.querySelector('#overlay .modal');if(md&&sc)md.scrollTop=sc}else closeOverlay()}
   if(view.edit){const t=document.getElementById('pe-text');if(t&&document.activeElement!==t){t.focus();t.setSelectionRange(t.value.length,t.value.length)}}
 }
 function renderNav(b){
@@ -1144,7 +1146,7 @@ function renderPageLayouts(b,m,ev){
       <div class="plc-sp">${ls.map((l,k)=>`<div class="plc-h ${l?'':'none'}" ${l?`draggable="true" data-drag="playout" data-pl="${esc(l.id)}" title="Glisser cette page seule sur une page du plan"`:''}>${l?plThumb(l,view.plLines):''}</div>`).join('')}</div>
       <div class="plc-cols">${ls.map(l=>l?col(l):'<div></div>').join('')}</div></article>`};
   const groups=srcs.map(src=>{const ls=b.pl.filter(l=>l.src===src);const pairs=plPairs(b,src,true);const info=(b.mepSrc||{})[src];
-    return `<section class="mepgrp"><div class="mepgrp-h"><h3>${esc(src)}</h3><span class="small muted">${pairs.length} planche${pairs.length>1?'s':''} · ${ls.length} page${ls.length>1?'s':''}${info&&info.at?' · importé le '+esc(fmtVer(info.at)):''}</span><span style="flex:1"></span><button class="btn ghost sm danger ${view.armed==='src:'+src?'armed':''}" data-act="mep-src-del" data-src="${esc(src)}">${view.armed==='src:'+src?'Confirmer : retirer ce fichier':'Retirer ce fichier'}</button></div>
+    return `<section class="mepgrp"><div class="mepgrp-h"><h3>${esc(src)}</h3><button class="icon-btn" data-act="mep-settings" title="Réglages et import des mises en page" aria-label="Réglages des mises en page">${I_GEAR}</button><span class="small muted">${pairs.length} planche${pairs.length>1?'s':''} · ${ls.length} page${ls.length>1?'s':''}${info&&info.at?' · importé le '+esc(fmtVer(info.at)):''}</span><span style="flex:1"></span><button class="btn ghost sm danger ${view.armed==='src:'+src?'armed':''}" data-act="mep-src-del" data-src="${esc(src)}">${view.armed==='src:'+src?'Confirmer : retirer ce fichier':'Retirer ce fichier'}</button></div>
       <div class="plcs">${pairs.map(pcard).join('')}</div></section>`}).join('');
   const drop=`<div class="mepdrop" data-drop="mepdir">Glissez ici le dossier « … - export MEP » créé par le script InDesign. Un nouvel export du même fichier met à jour ses mises en page sans toucher aux pages où elles sont posées.</div>`;
   const empty=`<div class="panel emptystate" data-drop="mepdir"><h2>Importer les mises en page du fichier MEP</h2>
@@ -1152,8 +1154,9 @@ function renderPageLayouts(b,m,ev){
       <li><span>Ouvrez votre fichier MEP et double-cliquez sur le script : cochez l'image témoin de vos blocs photo. Il crée un dossier « … - export MEP » à côté du fichier.</span></li>
       <li><span>Glissez ce dossier ici (ou « Importer un export MEP »). Chaque page devient une mise en page de ce livre uniquement.</span></li></ol>
       <div class="row" style="justify-content:center"><button class="btn" data-act="mep-script">Télécharger le script d'export</button><button class="btn primary" data-act="mep-pick">${I_FOLDER} Importer un export MEP</button></div></div>`;
-  const legacy=b.layouts.length?`<details class="legacy" ${b.pl.length?'':'open'}><summary>Anciennes mises en page (captures) · ${b.layouts.length}</summary>${renderLayouts(b,m,ev)}</details>`:'';
-  return calc+actions+(b.pl.length?drop+groups:empty)+legacy;
+  const legacy=b.layouts.length?`<details class="legacy" ${b.pl.length?'':'open'}><summary>Anciennes mises en page (captures) · ${b.layouts.length}<button class="btn ghost sm danger ${view.armed==='legacy'?'armed':''}" data-act="legacy-del" title="Supprimer toutes les anciennes mises en page de ce livre">${view.armed==='legacy'?'Confirmer : tout supprimer':I_TRASH}</button></summary>${renderLayouts(b,m,ev)}</details>`:'';
+  view._mepSet=`<div class="row" style="justify-content:space-between"><h3>Réglages des mises en page</h3><button class="btn ghost sm" data-act="close-overlay">Fermer</button></div>`+calc+actions+drop;
+  return b.pl.length?groups+legacy:calc+actions+empty+legacy;
 }
 // Reads the folder exported by the InDesign script into the current book only
 function shortName(src){return src}
@@ -1600,6 +1603,8 @@ document.addEventListener('click',async ev=>{
     case 'fill-blocks':{const key=t.dataset.key,side=t.dataset.side;const l=plById(b)[b.pageLay[pageOfSide(key,side)]];if(!l)break;const F=pageFill(l,sideEntries(b,key,side));
       const free=F.frs.filter(f=>!F.map.has(f.id));let k=0;for(const e of F.extra){if(k>=free.length)break;e.a.f=free[k++].id}save(b);toast(k?`${k} photo${k>1?'s':''} posée${k>1?'s':''} dans les blocs vides`:'Aucun bloc vide');break}
     case 'empty-blocks':{const key=t.dataset.key,side=t.dataset.side;(b.assign[key]||[]).forEach(a=>{if(photoSide(key,a)===side)delete a.f});save(b);break}
+    case 'mep-settings':view.mepSettings=true;render();break;
+    case 'legacy-del':{ev.preventDefault();if(view.armed!=='legacy'){arm('legacy');break}view.armed=null;remember(b);const n=b.layouts.length;b.layouts=[];b.spreads={};save(b);toastUndo(`${n} anciennes mises en page supprimées`);break}
     case 'pl-lock':{const l=b.pl.find(x=>x.id===t.dataset.pl);if(l){l.locked=!l.locked;save(b)}break}
     case 'pl-del':{const id=t.dataset.pl;if(view.armed==='pl:'+id){view.armed=null;remember(b);b.pl=b.pl.filter(l=>l.id!==id);for(const k in b.pageLay)if(b.pageLay[k]===id)delete b.pageLay[k];save(b);toastUndo('Mise en page supprimée')}else arm('pl:'+id);break}
     case 'mep-src-del':{const src=t.dataset.src;if(view.armed==='src:'+src){view.armed=null;remember(b);const ids=new Set(b.pl.filter(l=>l.src===src).map(l=>l.id));b.pl=b.pl.filter(l=>!ids.has(l.id));for(const k in b.pageLay)if(ids.has(b.pageLay[k]))delete b.pageLay[k];if(b.mepSrc)delete b.mepSrc[src];save(b);toastUndo(`« ${src} » retiré du livre`)}else arm('src:'+src);break}
