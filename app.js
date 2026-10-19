@@ -42,6 +42,7 @@ const I_CUT='<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
 function normBook(b){
   b.stages=Object.assign({cdf:'todo',photos:'todo',template:'todo',texte:'todo',mep:'todo',relecture:'todo'},b.stages||{});
   b.events=b.events||[];b.pages=b.pages||{};b.layouts=b.layouts||[];b.spreads=b.spreads||{};b.pins=b.pins||{};b.assign=b.assign||{};b.jalons=b.jalons||[];b.spreadNames=b.spreadNames||{};
+  b.pl=b.pl||[];b.pageLay=b.pageLay||{};b.texts=b.texts||{};
   b.pageCount=+b.pageCount||0;b.maxReuse=+b.maxReuse||5;b.note=b.note||'';b.year=+b.year||new Date().getFullYear();
   if(b.useTypes===undefined)b.useTypes=b.layouts.some(l=>l.family);
   b.layouts.forEach(l=>{if(l.locked===undefined)l.locked=l.family==='Spéciale'});
@@ -62,6 +63,16 @@ function pagesLabel(pages){ // "Pl. 2 · p. 3 (droite)" or "Pl. 3–4 · p. 4–
 
 /* ---- moving an event: everything after the target moves by whole planches, so each page keeps its side ---- */
 const SPREAD_MAPS=['spreads','assign','pins','spreadNames'];
+// Page-keyed data (layout of each page, texts written for it) follows the pages when they move
+function remapPages(b,fn){
+  const o={};for(const [k,v] of Object.entries(b.pageLay||{}))o[fn(+k)]=v;b.pageLay=o;
+  const t={};for(const [k,v] of Object.entries(b.texts||{})){const i=k.indexOf('|');t[fn(+k.slice(0,i))+k.slice(i)]=v}b.texts=t;
+}
+function takePages(b,pages){const out={lay:{},tx:{}};b.pageLay=b.pageLay||{};b.texts=b.texts||{};
+  pages.forEach((p,i)=>{if(b.pageLay[p]){out.lay[i]=b.pageLay[p];delete b.pageLay[p]}});
+  for(const k of Object.keys(b.texts)){const j=k.indexOf('|');const i=pages.indexOf(+k.slice(0,j));if(i>=0){out.tx[i+k.slice(j)]=b.texts[k];delete b.texts[k]}}return out}
+function putPages(b,taken,dest){for(const [i,v] of Object.entries(taken.lay))if(dest[+i]!=null)b.pageLay[dest[+i]]=v;
+  for(const [k,v] of Object.entries(taken.tx)){const j=k.indexOf('|');const i=+k.slice(0,j);if(dest[i]!=null)b.texts[dest[i]+k.slice(j)]=v}}
 function planMove(b0,evId,T,Lp){
   const b=clone(b0);b.spreadNames=b.spreadNames||{};
   const own=Object.keys(b.pages).map(Number).filter(p=>b.pages[p]===evId).sort((a,z)=>a-z);
@@ -69,7 +80,7 @@ function planMove(b0,evId,T,Lp){
   // planches fully owned by the event travel with it (layout, photos, name, lock) when the target is a left page
   const owned=spreadsOf(b.pageCount).filter(s=>{const pg=spreadPages(b,s.key);return pg.length===2&&pg.every(p=>b.pages[p]===evId)}).map(s=>s.key);
   const carry=(T%2===0&&contiguous&&own.length===Lp&&owned.length)?owned.map(k=>{const o={};SPREAD_MAPS.forEach(m=>{if(b[m]&&b[m][k]!==undefined){o[m]=b[m][k];delete b[m][k]}});return o}):[];
-  own.forEach(p=>delete b.pages[p]);
+  own.forEach(p=>delete b.pages[p]);const tk=takePages(b,own);
   const busy=p=>!!b.pages[p];const S=2*Math.ceil(Lp/2);let G=null;
   const maxUsed=Math.max(0,...Object.keys(b.pages).map(Number));
   if([...Array(Lp).keys()].some(i=>busy(T+i))){
@@ -77,8 +88,10 @@ function planMove(b0,evId,T,Lp){
     for(let g=T+1;;g++){if((g-T)%2)continue;if(g>maxUsed+1){G=g;break}let free=true;for(let i=0;i<S;i++)if(busy(g+i)){free=false;break}if(free){G=g;break}}
     const np={};for(const [p,e] of Object.entries(b.pages)){const n=+p;np[n>=T&&n<G?n+S:n]=e}b.pages=np;
     for(const m of SPREAD_MAPS){if(!b[m])continue;const nm={};for(const [k,v] of Object.entries(b[m])){const n=+k;nm[n>0&&n>=T&&n<G?n+S:n]=v}b[m]=nm}
+    remapPages(b,n=>n>=T&&n<G?n+S:n);
   }
   for(let i=0;i<Lp;i++)b.pages[T+i]=evId;
+  putPages(b,tk,own.map((_,i)=>T+i));
   carry.forEach((o,i)=>{const k=T+2*i;for(const m in o)b[m][k]=o[m]});
   const newMax=Math.max(0,...Object.keys(b.pages).map(Number));
   const grow=newMax>b.pageCount?Math.ceil(newMax/4)*4:0;if(grow)b.pageCount=grow;
@@ -127,25 +140,28 @@ function evById(b){const m={};b.events.forEach(e=>m[e.id]=e);return m}
 function layById(b){const m={};b.layouts.forEach(l=>m[l.id]=l);return m}
 function eventPages(b){const m={};for(let p=1;p<=b.pageCount;p++){const e=b.pages[p];if(e)(m[e]=m[e]||[]).push(p)}return m}
 function capacity(b){
-  const lay=layById(b);const out={};
+  const lay=layById(b);const out={};const PL=usesPL(b),plm=plById(b);
   for(const s of spreadsOf(b.pageCount)){
     const pages=[s.l,s.r].filter(Boolean);const l=lay[b.spreads[s.key]];const placed=(b.assign[s.key]||[]).length;
     for(const p of pages){const e=b.pages[p];if(!e)continue;const o=out[e]=out[e]||{slots:0,known:true,spreads:new Set(),layouts:new Set(),placed:0};
       if(!o.spreads.has(s.key))o.placed+=placed;o.spreads.add(s.key);
-      if(l){o.layouts.add(l.id);if(l.photos>0)o.slots+=l.photos/pages.length;else o.known=false}else o.known=false}
+      if(PL){const pl=plm[b.pageLay[p]];if(pl){o.layouts.add(pl.id);o.slots+=plPhotos(pl)}else o.known=false}
+      else if(l){o.layouts.add(l.id);if(l.photos>0)o.slots+=l.photos/pages.length;else o.known=false}else o.known=false}
   }
   for(const k in out)out[k].slots=Math.round(out[k].slots);return out;
 }
 function metrics(b){
-  const sp=spreadsOf(b.pageCount), ev=evById(b), u=usage(b), max=b.maxReuse;
+  const sp=spreadsOf(b.pageCount), ev=evById(b), PL=usesPL(b), u=PL?plUsage(b):usage(b), max=b.maxReuse;
   let filled=0;for(let p=1;p<=b.pageCount;p++)if(ev[b.pages[p]])filled++;
-  const withLay=sp.filter(s=>b.layouts.some(l=>l.id===b.spreads[s.key])).length;
-  const over=b.layouts.filter(l=>(u[l.id]||[]).length>max);
-  const needed=sp.length?Math.ceil(sp.length/max):0;
+  const plm=PL?plById(b):null;let withLay=0;if(PL){for(let p=1;p<=b.pageCount;p++)if(plm[b.pageLay[p]])withLay++}else withLay=sp.filter(s=>b.layouts.some(l=>l.id===b.spreads[s.key])).length;
+  const over=(PL?b.pl:b.layouts).filter(l=>(u[l.id]||[]).length>max);
+  const needed=PL?(b.pageCount?Math.ceil(b.pageCount/max):0):(sp.length?Math.ceil(sp.length/max):0);
+  const nLay=PL?b.pl.filter(l=>!l.gone).length:b.layouts.length;
   const cap=capacity(b);const short=b.events.filter(e=>e.photos>0&&cap[e.id]&&cap[e.id].known&&cap[e.id].slots<e.photos);
   const valid=new Set(sp.map(s=>String(s.key)));
   const placed=Object.entries(b.assign).filter(([k])=>valid.has(k)).reduce((a,[,v])=>a+v.length,0);
-  return {sp,filled,withLay,over,needed,short,u,cap,placed};
+  let texts=0;for(const k in b.texts)if(hasText(b.texts[k]))texts++;
+  return {sp,filled,withLay,over,needed,short,u,cap,placed,PL,nLay,texts};
 }
 function progress(b){return STAGES.reduce((a,[k])=>a+ST[b.stages[k]||'todo'].w,0)/STAGES.length}
 function usedPaths(b){const m=new Map();if(!b)return m;for(const [k,arr] of Object.entries(b.assign))for(const a of arr){if(!m.has(a.p))m.set(a.p,[]);m.get(a.p).push(+k)}return m}
@@ -289,6 +305,9 @@ function autoLabel(a,z){
   if(!same(a.spreads,z.spreads))return 'Mise en page de planche';
   if(!same(a.layouts,z.layouts))return 'Mises en page modifiées';
   if(!same(a.assign,z.assign))return 'Photos placées';
+  if(!same(a.texts,z.texts))return 'Texte rédigé';
+  if(!same(a.pageLay,z.pageLay))return 'Mise en page des pages';
+  if(!same(a.pl,z.pl))return 'Mises en page modifiées';
   if(!same(a.jalons,z.jalons))return 'Jalons';
   if(!same(a.spreadNames,z.spreadNames))return 'Nom de planche';
   if(!same(a.pins,z.pins))return 'Verrou de planche';
@@ -391,8 +410,8 @@ async function boot(){
     db.collection('captures').onSnapshot(snap=>{const c={};snap.docs.forEach(d=>c[d.id]=d.data().data);captures=c;softRender()},()=>{});
   } else {mode='local';if(await idbOpen())await loadIDB();else loadLocal();loaded=true;setSaved(books.size?'Enregistré dans ce navigateur':'');render();cloudInit()}
 }
-function softRender(){if(drag){needsRender=true;return}const a=document.activeElement;if(a&&a.closest&&a.closest('#app')&&/INPUT|TEXTAREA|SELECT/.test(a.tagName)&&a.type!=='checkbox'&&a.type!=='range'){needsRender=true;return}render()}
-document.addEventListener('focusout',()=>{if(needsRender&&!drag){needsRender=false;setTimeout(()=>{const a=document.activeElement;if(!(a&&/INPUT|TEXTAREA|SELECT/.test(a.tagName)))render();else needsRender=true},0)}});
+function softRender(){if(drag){needsRender=true;return}const a=document.activeElement;if(a&&a.closest&&a.closest('#app')&&((/INPUT|TEXTAREA|SELECT/.test(a.tagName)&&a.type!=='checkbox'&&a.type!=='range')||a.isContentEditable)){needsRender=true;return}render()}
+document.addEventListener('focusout',()=>{if(needsRender&&!drag){needsRender=false;setTimeout(()=>{const a=document.activeElement;if(!(a&&(/INPUT|TEXTAREA|SELECT/.test(a.tagName)||a.isContentEditable)))render();else needsRender=true},0)}});
 
 /* ================= images ================= */
 function loadImg(file){return new Promise((res,rej)=>{const u=URL.createObjectURL(file);const i=new Image();i.onload=()=>{res(i);setTimeout(()=>URL.revokeObjectURL(u),1000)};i.onerror=rej;i.src=u})}
@@ -438,16 +457,30 @@ function exportRows(b){
 function buildCsv(b){
   const q=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
   const lines=[['Planche','Page','Côté','Événement','Mise en page','Ordre sur la page','Chemin','Fichier','Date de prise de vue'].map(q).join(';')];
-  for(const r of exportRows(b))for(const side of ['l','r']){const list=r.photos.filter(a=>photoSide(r.key,a)===side);const pg=r.key===0?1:(side==='l'?r.key:r.key+1);
-    list.forEach((a,i)=>lines.push([r.label,pg,side==='l'?'gauche':'droite',r.event,r.layout,i+1,a.p,baseName(a.p),a.d?new Date(a.d).toLocaleString('fr-FR'):''].map(q).join(';')))}
+  const PL=usesPL(b),plm=plById(b);
+  for(const r of exportRows(b))for(const side of ['l','r']){const list=r.photos.filter(a=>photoSide(r.key,a)===side);const pg=r.key===0?1:(side==='l'?r.key:r.key+1);const lname=PL?((plm[b.pageLay[pg]]||{}).name||''):r.layout;
+    list.forEach((a,i)=>lines.push([r.label,pg,side==='l'?'gauche':'droite',r.event,lname,i+1,a.p,baseName(a.p),a.d?new Date(a.d).toLocaleString('fr-FR'):''].map(q).join(';')))}
   return '﻿'+lines.join('\r\n')}
 const asciiJson=o=>JSON.stringify(o,null,1).replace(/[\u007f-￿]/g,c=>'\\u'+c.charCodeAt(0).toString(16).padStart(4,'0'));
 function buildJsx(b){
+  const ev=evById(b),plm=plById(b),PL=usesPL(b);const pages=[];
+  for(let p=1;p<=b.pageCount;p++){
+    const key=spreadKeyOf(p),side=pageSideOf(p);const list=sideEntries(b,key,side);const l=PL?plm[b.pageLay[p]]:null;
+    let photos=[],slots=null,nf=0;
+    if(l){const F=pageFill(l,list);nf=F.frs.length;slots=[];F.frs.forEach((f,j)=>{const en=F.map.get(f.id);if(en){photos.push(en.a.p);slots.push(j)}});F.extra.forEach(en=>{photos.push(en.a.p);slots.push(-1)})}
+    else photos=list.map(x=>x.a.p);
+    const sts=PL?pageStories(b,p):[];const texts=[];
+    sts.forEach((st,i)=>{const rec=b.texts[st.tkey];if(hasText(rec))texts.push({i,paras:rec.paras.map(pp=>({al:pp.al||'',runs:(pp.runs||[]).filter(r=>r.t).map(r=>({t:r.t,b:r.b?1:0,c:r.c?1:0}))}))})});
+    if(!photos.length&&!texts.length)continue;
+    const e=ev[b.pages[p]];const nm=(b.spreadNames||{})[key]||'';
+    pages.push({page:p,label:`p. ${p}${p%2?' (droite)':' (gauche)'}${nm?' · '+nm:''}`,event:e?e.name:'',photos,slots,nf,texts,ns:sts.length});
+  }
   const data={book:b.title,root:b.photoRoot||'',generated:new Date().toLocaleString('fr-FR'),onlyEmpty:true,rowTolerance:3,
-    roots:bookFolders(b).slice(1).map(f=>f.name),spreads:exportRows(b).map(r=>({label:r.label,name:(b.spreadNames||{})[r.key]||'',layout:r.layout,event:r.event,sides:(r.key===0?[['r',1]]:[['l',r.key],['r',r.key+1]]).map(([sd,pg])=>({page:pg,photos:r.photos.filter(a=>photoSide(r.key,a)===sd).map(a=>a.p)})).filter(x=>x.photos.length)}))};
+    roots:bookFolders(b).slice(1).map(f=>f.name),placeholders:[...new Set(b.pl.flatMap(l=>l.ph||[]))],pages};
   return '\uFEFF'+JSX_TEMPLATE.replace('@@TITLE@@',b.title.replace(/[\r\n]/g,' ')).replace('@@DATE@@',data.generated).replace('@@DATA@@',()=>asciiJson(data));
 }
-const JSX_TEMPLATE="// Chemin de fer - conception livre : placement des photos dans InDesign\n// Livre : @@TITLE@@ (g\u00e9n\u00e9r\u00e9 le @@DATE@@)\n// Installation : Fen\u00eatre > Utilitaires > Scripts, clic droit sur \u00ab Utilisateur \u00bb > Faire appara\u00eetre dans le Finder / l'Explorateur,\n// copiez ce fichier dans ce dossier, puis double-cliquez sur son nom dans le panneau Scripts (document du livre ouvert).\n// Une palette s'ouvre : choisissez une page, chargez ses photos dans le curseur et cliquez dans les blocs image dans l'ordre voulu,\n// ou utilisez le placement automatique. Chaque action s'annule avec \u00c9dition > Annuler.\n#target indesign\n#targetengine \"cheminDeFerPhotos\"\nvar DATA = @@DATA@@;\n(function () {\n  if (app.documents.length === 0) { alert(\"Ouvrez d'abord le document InDesign du livre.\"); return; }\n  var doc = app.activeDocument, base = null;\n  try { base = doc.filePath; } catch (e) { base = null; }\n  // Finds a photo: first at its path relative to the folder, otherwise by its file name anywhere inside the folder.\n  var indexes = {};\n  function nm(s) { try { s = decodeURI(s); } catch (e) {} return String(s).toLowerCase(); }\n  function walk(folder, depth) {\n    if (depth > 8) return;\n    var items = folder.getFiles();\n    for (var i = 0; i < items.length; i++) {\n      var it = items[i];\n      if (it instanceof Folder) { if (nm(it.name).charAt(0) !== \".\") walk(it, depth + 1); }\n      else { var k = nm(it.name); if (!index[k]) index[k] = it; }\n    }\n  }\n  function fileAt(folder, rel, deep) {\n    if (!folder) return null;\n    var f = new File(folder.fullName + \"/\" + rel); if (f.exists) return f;\n    var parts = rel.split(\"/\");\n    for (var s = 1; s < parts.length; s++) { f = new File(folder.fullName + \"/\" + parts.slice(s).join(\"/\")); if (f.exists) return f; }\n    if (deep === false) return null;\n    if (!indexes[folder.fullName]) { index = {}; walk(folder, 0); indexes[folder.fullName] = index; }\n    return indexes[folder.fullName][nm(parts[parts.length - 1])] || null;\n  }\n  var index = null, extra = {};\n  // Photos of extra folders are stored as \"@folder name/\u2026\": look inside the main folder first, then ask once for that folder\n  function resolve(rel) {\n    if (rel.charAt(0) !== \"@\") return fileAt(base, rel);\n    var cut = rel.indexOf(\"/\"), fname = rel.slice(1, cut), rest = rel.slice(cut + 1);\n    if (extra[fname] === undefined) {\n      var inBase = fileAt(base, fname + \"/\" + rest);\n      if (inBase) return inBase;\n      extra[fname] = Folder.selectDialog(\"S\u00e9lectionnez le dossier photos \u00ab \" + fname + \" \u00bb\") || null;\n    }\n    return extra[fname] ? fileAt(extra[fname], rest) : null;\n  }\n  // Pages to fill, in book order\n  var items = [];\n  for (var i = 0; i < DATA.spreads.length; i++) {\n    var sp = DATA.spreads[i];\n    for (var q = 0; q < sp.sides.length; q++) {\n      var sd = sp.sides[q];\n      items.push({ page: sd.page, photos: sd.photos, label: \"p. \" + sd.page + (sd.page % 2 ? \" (droite)\" : \" (gauche)\") + (sp.name ? \" \u00b7 \" + sp.name : \"\"), event: sp.event });\n    }\n  }\n  if (!items.length) { alert(\"Aucune photo \u00e0 placer.\"); return; }\n  var probe = null;\n  for (var pi = 0; pi < items.length && !probe; pi++) for (var pj = 0; pj < items[pi].photos.length && !probe; pj++) if (items[pi].photos[pj].charAt(0) !== \"@\") probe = items[pi].photos[pj];\n  var tries = [];\n  if (base) { tries.push(base); if (base.parent) tries.push(base.parent); }\n  var found = null;\n  if (!probe) found = base;\n  for (var t = 0; t < tries.length && !found; t++) if (fileAt(tries[t], probe, t === 0)) found = tries[t];\n  while (!found) {\n    var fol = Folder.selectDialog(\"Photos introuvables. S\u00e9lectionnez le dossier qui contient les photos du livre (celui choisi dans l'application : \u00ab \" + DATA.root + \" \u00bb)\");\n    if (!fol) return;\n    if (fileAt(fol, probe)) found = fol;\n    else if (!confirm(\"La photo \u00ab \" + probe.split(\"/\").pop() + \" \u00bb n'est pas dans ce dossier ni ses sous-dossiers.\\nChoisir un autre dossier ?\")) return;\n  }\n  base = found;\n\n  function pageByNumber(n) { var p = doc.pages.itemByName(String(n)); if (p.isValid) return p; if (n - 1 < doc.pages.length) return doc.pages[n - 1]; return null; }\n  function graphicFrames(page) {\n    var out = [], all = page.allPageItems;\n    for (var i = 0; i < all.length; i++) {\n      var it = all[i];\n      if (!(it instanceof Rectangle || it instanceof Polygon || it instanceof Oval)) continue;\n      try { if (it.contentType !== ContentType.GRAPHIC_TYPE) continue; if (it.locked) continue; } catch (e) { continue; }\n      if (DATA.onlyEmpty && it.allGraphics.length > 0) continue;\n      out.push(it);\n    }\n    out.sort(function (a, b) { var A = a.geometricBounds, B = b.geometricBounds; var dy = A[0] - B[0]; if (Math.abs(dy) > DATA.rowTolerance) return dy; return A[1] - B[1]; });\n    return out;\n  }\n  function fitIn(fr) { try { fr.fit(FitOptions.FILL_PROPORTIONALLY); fr.fit(FitOptions.CENTER_CONTENT); } catch (e) {} }\n  function filesOf(item) { var ok = [], miss = []; for (var j = 0; j < item.photos.length; j++) { var f = resolve(item.photos[j]); if (f) ok.push(f); else miss.push(item.photos[j]); } return { ok: ok, miss: miss }; }\n  function autoPlace(list) {\n    var placed = 0, missing = [], noFrame = [], noPage = [];\n    app.doScript(function () {\n      for (var i = 0; i < list.length; i++) {\n        var it = list[i], pg = pageByNumber(it.page);\n        if (!pg) { noPage.push(it.page); continue; }\n        var frames = graphicFrames(pg), fi = 0;\n        for (var j = 0; j < it.photos.length; j++) {\n          var f = resolve(it.photos[j]);\n          if (!f) { missing.push(it.label + \" : \" + it.photos[j]); continue; }\n          if (fi >= frames.length) { noFrame.push(it.label + \" : \" + it.photos[j]); continue; }\n          var fr = frames[fi++];\n          try { fr.place(f); fitIn(fr); placed++; } catch (e) { missing.push(it.label + \" : \" + it.photos[j] + \" (\" + e.message + \")\"); }\n        }\n      }\n    }, ScriptLanguage.JAVASCRIPT, undefined, UndoModes.ENTIRE_SCRIPT, \"Placer les photos (chemin de fer)\");\n    function lst(t, a) { return a.length ? \"\\n\\n\" + t + \" (\" + a.length + \") :\\n\" + a.slice(0, 12).join(\"\\n\") + (a.length > 12 ? \"\\n...\" : \"\") : \"\"; }\n    alert(placed + \" photo(s) plac\u00e9e(s).\" + lst(\"Pas assez de blocs image vides\", noFrame) + lst(\"Fichiers introuvables\", missing) + lst(\"Pages absentes du document\", noPage));\n  }\n\n  // ---------- palette ----------\n  var w = new Window(\"palette\", \"Photos \u00b7 \" + DATA.book, undefined, { resizeable: true });\n  w.orientation = \"column\"; w.alignChildren = [\"fill\", \"top\"]; w.spacing = 6; w.margins = 10;\n  var help = w.add(\"statictext\", undefined, \"1. Choisissez une page.  2. \u00ab Charger dans le curseur \u00bb, puis cliquez dans les blocs image dans l'ordre voulu (\u00c9chap vide le curseur).  Ou s\u00e9lectionnez un bloc et une photo, puis \u00ab Placer dans le bloc \u00bb.\", { multiline: true });\n  help.preferredSize = [440, 44];\n  w.add(\"statictext\", undefined, \"Pages \u00e0 remplir :\");\n  var pageList = w.add(\"listbox\", undefined, []); pageList.preferredSize = [440, 200];\n  for (var i = 0; i < items.length; i++) pageList.add(\"item\", items[i].label + \"  \u2014  \" + items[i].photos.length + \" photo(s)\");\n  w.add(\"statictext\", undefined, \"Photos de la page (ordre de l'application) :\");\n  var photoList = w.add(\"listbox\", undefined, [], { multiselect: true }); photoList.preferredSize = [440, 150];\n  var g1 = w.add(\"group\"); g1.alignment = [\"fill\", \"top\"];\n  var bGo = g1.add(\"button\", undefined, \"Aller \u00e0 la page\");\n  var bGun = g1.add(\"button\", undefined, \"Charger dans le curseur\");\n  var bSel = g1.add(\"button\", undefined, \"Placer dans le bloc\");\n  var g2 = w.add(\"group\"); g2.alignment = [\"fill\", \"top\"];\n  var bAutoPage = g2.add(\"button\", undefined, \"Auto : cette page\");\n  var bAutoAll = g2.add(\"button\", undefined, \"Auto : tout le livre\");\n  var bClose = g2.add(\"button\", undefined, \"Fermer\");\n  var status = w.add(\"statictext\", undefined, items.length + \" pages \u00e0 remplir.\", { truncate: \"end\" }); status.preferredSize = [440, 18];\n  var cur = null, curFiles = null;\n  function current() { return pageList.selection ? items[pageList.selection.index] : null; }\n  function fillPhotos() {\n    photoList.removeAll(); cur = current(); if (!cur) return;\n    curFiles = [];\n    for (var j = 0; j < cur.photos.length; j++) {\n      var f = resolve(cur.photos[j]); curFiles.push(f);\n      photoList.add(\"item\", (j + 1) + \". \" + cur.photos[j].split(\"/\").pop() + (f ? \"\" : \"   (introuvable)\"));\n    }\n    status.text = cur.label + (cur.event ? \" \u00b7 \" + cur.event.split(\"\\n\")[0] : \"\");\n  }\n  function goTo() { if (!cur) return null; var pg = pageByNumber(cur.page); if (!pg) { status.text = \"Page \" + cur.page + \" absente du document.\"; return null; } try { app.activeWindow.activePage = pg; } catch (e) {} return pg; }\n  function chosenFiles() {\n    var out = [];\n    if (photoList.selection && photoList.selection.length) { for (var k = 0; k < photoList.selection.length; k++) { var f = curFiles[photoList.selection[k].index]; if (f) out.push(f); } }\n    else for (var j = 0; j < curFiles.length; j++) if (curFiles[j]) out.push(curFiles[j]);\n    return out;\n  }\n  pageList.onChange = function () { fillPhotos(); goTo(); };\n  bGo.onClick = function () { if (!cur) { status.text = \"Choisissez d'abord une page.\"; return; } goTo(); };\n  bGun.onClick = function () {\n    if (!cur) { status.text = \"Choisissez d'abord une page.\"; return; }\n    var files = chosenFiles(); if (!files.length) { status.text = \"Aucune photo trouv\u00e9e pour cette page.\"; return; }\n    goTo();\n    try { doc.placeGuns.loadPlaceGun(files, false); status.text = files.length + \" photo(s) dans le curseur : cliquez dans les blocs, dans l'ordre voulu.\"; }\n    catch (e) { alert(\"Le curseur charg\u00e9 n'est pas disponible dans cette version d'InDesign.\\nUtilisez \u00ab Placer dans le bloc \u00bb ou le placement automatique.\\n\\n\" + e.message); }\n  };\n  bSel.onClick = function () {\n    if (!cur) { status.text = \"Choisissez d'abord une page.\"; return; }\n    var files = chosenFiles(); if (!files.length) { status.text = \"S\u00e9lectionnez une photo dans la liste.\"; return; }\n    if (!app.selection.length) { status.text = \"S\u00e9lectionnez d'abord un bloc image dans le document.\"; return; }\n    var fr = app.selection[0];\n    try { if (!(fr instanceof Rectangle || fr instanceof Polygon || fr instanceof Oval) && fr.parent) fr = fr.parent; } catch (e) {}\n    if (!(fr instanceof Rectangle || fr instanceof Polygon || fr instanceof Oval)) { status.text = \"La s\u00e9lection n'est pas un bloc image.\"; return; }\n    app.doScript(function () { fr.place(files[0]); fitIn(fr); }, ScriptLanguage.JAVASCRIPT, undefined, UndoModes.ENTIRE_SCRIPT, \"Placer une photo\");\n    status.text = \"\u00ab \" + decodeURI(files[0].name) + \" \u00bb plac\u00e9e.\";\n    if (photoList.selection && photoList.selection.length) { var nx = photoList.selection[photoList.selection.length - 1].index + 1; photoList.selection = null; if (nx < photoList.items.length) photoList.selection = nx; }\n  };\n  bAutoPage.onClick = function () { if (!cur) { status.text = \"Choisissez d'abord une page.\"; return; } goTo(); autoPlace([cur]); };\n  bAutoAll.onClick = function () { autoPlace(items); };\n  bClose.onClick = function () { w.close(); };\n  w.onResizing = w.onResize = function () { this.layout.resize(); };\n  pageList.selection = 0;\n  w.show();\n})();\n";
+const JSX_TEMPLATE="// Chemin de fer - conception livre : photos et textes dans InDesign\n// Livre : @@TITLE@@ (g\u00e9n\u00e9r\u00e9 le @@DATE@@)\n// Installation : Fen\u00eatre > Utilitaires > Scripts, clic droit sur \u00ab Utilisateur \u00bb > Faire appara\u00eetre dans le Finder / l'Explorateur,\n// copiez ce fichier dans ce dossier, puis double-cliquez sur son nom dans le panneau Scripts (document du livre ouvert).\n// Une palette s'ouvre : choisissez une page, chargez ses photos dans le curseur et cliquez dans les blocs image dans l'ordre voulu,\n// ou utilisez le placement automatique. Les textes r\u00e9dig\u00e9s dans l'application se versent dans les blocs texte sans toucher\n// \u00e0 leur mise en forme. Chaque action s'annule avec \u00c9dition > Annuler.\n#target indesign\n#targetengine \"cheminDeFerPhotos\"\nvar DATA = @@DATA@@;\n(function () {\n  if (app.documents.length === 0) { alert(\"Ouvrez d'abord le document InDesign du livre.\"); return; }\n  var doc = app.activeDocument, base = null, baseChecked = false;\n  try { base = doc.filePath; } catch (e) { base = null; }\n  var PH = DATA.placeholders || [];\n  function has(a, v) { for (var i = 0; i < a.length; i++) if (a[i] === v) return true; return false; }\n  // Finds a photo: first at its path relative to the folder, otherwise by its file name anywhere inside the folder.\n  var indexes = {};\n  function nm(s) { try { s = decodeURI(s); } catch (e) {} return String(s).toLowerCase(); }\n  function walk(folder, depth) {\n    if (depth > 8) return;\n    var items = folder.getFiles();\n    for (var i = 0; i < items.length; i++) {\n      var it = items[i];\n      if (it instanceof Folder) { if (nm(it.name).charAt(0) !== \".\") walk(it, depth + 1); }\n      else { var k = nm(it.name); if (!index[k]) index[k] = it; }\n    }\n  }\n  function fileAt(folder, rel, deep) {\n    if (!folder) return null;\n    var f = new File(folder.fullName + \"/\" + rel); if (f.exists) return f;\n    var parts = rel.split(\"/\");\n    for (var s = 1; s < parts.length; s++) { f = new File(folder.fullName + \"/\" + parts.slice(s).join(\"/\")); if (f.exists) return f; }\n    if (deep === false) return null;\n    if (!indexes[folder.fullName]) { index = {}; walk(folder, 0); indexes[folder.fullName] = index; }\n    return indexes[folder.fullName][nm(parts[parts.length - 1])] || null;\n  }\n  var index = null, extra = {};\n  // Photos of extra folders are stored as \"@folder name/\u2026\": look inside the main folder first, then ask once for that folder\n  function resolve(rel) {\n    if (rel.charAt(0) !== \"@\") return fileAt(base, rel);\n    var cut = rel.indexOf(\"/\"), fname = rel.slice(1, cut), rest = rel.slice(cut + 1);\n    if (extra[fname] === undefined) {\n      var inBase = fileAt(base, fname + \"/\" + rest);\n      if (inBase) return inBase;\n      extra[fname] = Folder.selectDialog(\"S\u00e9lectionnez le dossier photos \u00ab \" + fname + \" \u00bb\") || null;\n    }\n    return extra[fname] ? fileAt(extra[fname], rest) : null;\n  }\n  // Pages to fill, in book order (photos and/or texts)\n  var items = DATA.pages || [];\n  if (!items.length) { alert(\"Rien \u00e0 placer : ni photo ni texte.\"); return; }\n  var nPhotos = 0, nTexts = 0;\n  for (var c0 = 0; c0 < items.length; c0++) { nPhotos += items[c0].photos.length; nTexts += (items[c0].texts || []).length; }\n  // The photo folder is only looked for when photos are placed\n  function ensureBase() {\n    if (baseChecked) return !!base;\n    var probe = null;\n    for (var pi = 0; pi < items.length && !probe; pi++) for (var pj = 0; pj < items[pi].photos.length && !probe; pj++) if (items[pi].photos[pj].charAt(0) !== \"@\") probe = items[pi].photos[pj];\n    var tries = [];\n    if (base) { tries.push(base); if (base.parent) tries.push(base.parent); }\n    var found = null;\n    if (!probe) found = base || Folder.desktop;\n    for (var t = 0; t < tries.length && !found; t++) if (fileAt(tries[t], probe, t === 0)) found = tries[t];\n    while (!found) {\n      var fol = Folder.selectDialog(\"Photos introuvables. S\u00e9lectionnez le dossier qui contient les photos du livre (celui choisi dans l'application : \u00ab \" + DATA.root + \" \u00bb)\");\n      if (!fol) return false;\n      if (fileAt(fol, probe)) found = fol;\n      else if (!confirm(\"La photo \u00ab \" + probe.split(\"/\").pop() + \" \u00bb n'est pas dans ce dossier ni ses sous-dossiers.\\nChoisir un autre dossier ?\")) return false;\n    }\n    base = found; baseChecked = true; return true;\n  }\n\n  function pageByNumber(n) { var p = doc.pages.itemByName(String(n)); if (p.isValid) return p; if (n - 1 < doc.pages.length) return doc.pages[n - 1]; return null; }\n  // Items of a page, the same way the MEP export sees them: an item straddling two pages belongs to the left one\n  function itemsOfPage(page) {\n    var spread = page.parent, pages = spread.pages, out = [], all = spread.allPageItems, idx = -1;\n    for (var q = 0; q < pages.length; q++) if (pages[q].id === page.id) idx = q;\n    for (var i = 0; i < all.length; i++) {\n      var it = all[i], gb;\n      try { gb = it.geometricBounds; } catch (e) { continue; }\n      var own = -1;\n      for (var q2 = 0; q2 < pages.length; q2++) { var pb = pages[q2].bounds; if (Math.min(gb[3], pb[3]) - Math.max(gb[1], pb[1]) > 0.5 && Math.min(gb[2], pb[2]) - Math.max(gb[0], pb[0]) > 0.5) { own = q2; break; } }\n      if (own === idx) out.push(it);\n    }\n    return out;\n  }\n  function byPosition(a, b) { var A = a.geometricBounds, B = b.geometricBounds; var dy = A[0] - B[0]; if (Math.abs(dy) > DATA.rowTolerance) return dy; return A[1] - B[1]; }\n  function linkName(fr) { try { var g = fr.allGraphics; return g.length ? nm(g[0].itemLink.name) : \"\"; } catch (e) { return \"\"; } }\n  function isPlaceholder(fr) { var l = linkName(fr); if (!l) return true; for (var i = 0; i < PH.length; i++) if (nm(PH[i]) === l) return true; return false; }\n  // Photo blocks of a page: graphic frames that are empty or still hold the placeholder image of the MEP\n  function graphicFrames(page) {\n    var out = [], all = itemsOfPage(page);\n    for (var i = 0; i < all.length; i++) {\n      var it = all[i];\n      if (!(it instanceof Rectangle || it instanceof Polygon || it instanceof Oval)) continue;\n      try { if (it.parent instanceof Character) continue; if (it.contentType !== ContentType.GRAPHIC_TYPE) continue; if (it.locked) continue; } catch (e) { continue; }\n      if (DATA.onlyEmpty && !isPlaceholder(it)) continue;\n      out.push(it);\n    }\n    out.sort(byPosition);\n    return out;\n  }\n  function withPoints(fn) {\n    var vp = doc.viewPreferences, h = vp.horizontalMeasurementUnits, v = vp.verticalMeasurementUnits;\n    try { vp.horizontalMeasurementUnits = MeasurementUnits.POINTS; vp.verticalMeasurementUnits = MeasurementUnits.POINTS; return fn(); }\n    finally { try { vp.horizontalMeasurementUnits = h; vp.verticalMeasurementUnits = v; } catch (e) {} }\n  }\n  function fitIn(fr) { try { fr.fit(FitOptions.FILL_PROPORTIONALLY); fr.fit(FitOptions.CENTER_CONTENT); } catch (e) {} }\n  function lst(t, a) { return a.length ? \"\\n\\n\" + t + \" (\" + a.length + \") :\\n\" + a.slice(0, 12).join(\"\\n\") + (a.length > 12 ? \"\\n...\" : \"\") : \"\"; }\n  function autoPlace(list) {\n    if (!ensureBase()) return;\n    var placed = 0, missing = [], noFrame = [], noPage = [];\n    app.doScript(function () {\n      withPoints(function () {\n        for (var i = 0; i < list.length; i++) {\n          var it = list[i], pg = pageByNumber(it.page);\n          if (!it.photos.length) continue;\n          if (!pg) { noPage.push(it.page); continue; }\n          var frames = graphicFrames(pg), used = {};\n          // Same number of blocks as the layout in the application: each photo goes to the block chosen there\n          var useSlots = it.slots && it.nf && frames.length === it.nf;\n          for (var j = 0; j < it.photos.length; j++) {\n            var f = resolve(it.photos[j]);\n            if (!f) { missing.push(it.label + \" : \" + it.photos[j]); continue; }\n            var fi = -1;\n            if (useSlots && it.slots[j] >= 0 && !used[it.slots[j]]) fi = it.slots[j];\n            else for (var k = 0; k < frames.length; k++) if (!used[k] && !(useSlots && has(it.slots, k))) { fi = k; break; }\n            if (fi < 0) for (var k2 = 0; k2 < frames.length; k2++) if (!used[k2]) { fi = k2; break; }\n            if (fi < 0) { noFrame.push(it.label + \" : \" + it.photos[j]); continue; }\n            used[fi] = true;\n            try { frames[fi].place(f); fitIn(frames[fi]); placed++; } catch (e) { missing.push(it.label + \" : \" + it.photos[j] + \" (\" + e.message + \")\"); }\n          }\n        }\n      });\n    }, ScriptLanguage.JAVASCRIPT, undefined, UndoModes.ENTIRE_SCRIPT, \"Placer les photos (chemin de fer)\");\n    alert(placed + \" photo(s) plac\u00e9e(s).\" + lst(\"Pas assez de blocs image vides\", noFrame) + lst(\"Fichiers introuvables\", missing) + lst(\"Pages absentes du document\", noPage));\n  }\n\n  // ---------- texts ----------\n  function onlyGraphic(story) { try { return story.allGraphics.length > 0 && String(story.contents).replace(/[\\s\ufffc]/g, \"\") === \"\"; } catch (e) { return false; } }\n  // Stories that start on this page, in reading order (top to bottom, then left to right), as in the application\n  function storiesOfPage(page) {\n    var all = itemsOfPage(page), heads = [];\n    for (var i = 0; i < all.length; i++) {\n      var it = all[i];\n      if (!(it instanceof TextFrame)) continue;\n      try { if (it.parent instanceof Character) continue; if (it.parentStory.textContainers[0].id !== it.id) continue; if (onlyGraphic(it.parentStory)) continue; } catch (e) { continue; }\n      heads.push(it);\n    }\n    heads.sort(byPosition);\n    var out = []; for (var h = 0; h < heads.length; h++) out.push(heads[h].parentStory);\n    return out;\n  }\n  function plain(p) { var s = \"\"; for (var i = 0; i < p.runs.length; i++) s += p.runs[i].t; return s; }\n  var BOLD = [\"Bold\", \"Semibold\", \"SemiBold\", \"Demi\", \"Black\", \"Heavy\", \"Medium\", \"Gras\"];\n  function setBold(story, from, to) {\n    var ch = story.characters[from], fam;\n    try { fam = ch.appliedFont.fontFamily; } catch (e) { return false; }\n    var cur = String(ch.fontStyle), want = /italic|oblique/i.test(cur) ? [\" Italic\", \"\"] : [\"\"];\n    for (var i = 0; i < BOLD.length; i++) for (var w = 0; w < want.length; w++) {\n      var st = BOLD[i] + want[w];\n      if (app.fonts.itemByName(fam + \"\\t\" + st).isValid) { story.characters.itemByRange(from, to).fontStyle = st; return true; }\n    }\n    return false;\n  }\n  // Replaces the text paragraph by paragraph: each paragraph keeps the formatting of the layout (style of its first character),\n  // extra paragraphs take the style of the last one. Bold, capitals and left/right alignment are then added on top.\n  function setStory(story, paras, warn) {\n    if (!paras.length) paras = [{ runs: [{ t: \"\" }] }];\n    var n = paras.length;\n    while (story.paragraphs.length < n) story.insertionPoints[-1].contents = \"\\r\";\n    if (story.paragraphs.length > n) {\n      story.paragraphs.itemByRange(n, story.paragraphs.length - 1).remove();\n      var last = story.characters[-1]; if (last.isValid && last.contents === \"\\r\") last.remove();\n    }\n    for (var i = n - 1; i >= 0; i--) {\n      var p = story.paragraphs[i], L = p.characters.length, endsCR = L > 0 && p.characters[L - 1].contents === \"\\r\", vis = endsCR ? L - 1 : L, txt = plain(paras[i]);\n      if (vis === 0) { if (txt) p.insertionPoints[0].contents = txt; }\n      else { if (vis > 1) p.characters.itemByRange(1, vis - 1).remove(); if (txt) p.characters[0].contents = txt; else p.characters[0].remove(); }\n    }\n    for (var i2 = 0; i2 < n; i2++) {\n      var para = story.paragraphs[i2], start = para.characters[0].index, off = 0, P = paras[i2];\n      if (P.al === \"l\") para.justification = Justification.LEFT_ALIGN;\n      else if (P.al === \"r\") para.justification = Justification.RIGHT_ALIGN;\n      for (var r = 0; r < P.runs.length; r++) {\n        var run = P.runs[r], len = run.t.length;\n        if (len && run.b && !setBold(story, start + off, start + off + len - 1)) warn.push(\"gras indisponible pour cette police\");\n        if (len && run.c) story.characters.itemByRange(start + off, start + off + len - 1).capitalization = Capitalization.ALL_CAPS;\n        off += len;\n      }\n    }\n  }\n  function injectTexts(list) {\n    var done = 0, missing = [], warn = [], noPage = [];\n    app.doScript(function () {\n      withPoints(function () {\n        for (var i = 0; i < list.length; i++) {\n          var it = list[i]; if (!it.texts || !it.texts.length) continue;\n          var pg = pageByNumber(it.page); if (!pg) { noPage.push(it.page); continue; }\n          var stories = storiesOfPage(pg);\n          for (var k = 0; k < it.texts.length; k++) {\n            var tx = it.texts[k]; if (!tx) continue;\n            var st = stories[tx.i];\n            if (!st) { missing.push(it.label + \" : bloc texte n\u00b0 \" + (tx.i + 1) + \" absent\"); continue; }\n            try { setStory(st, tx.paras, warn); done++; } catch (e) { missing.push(it.label + \" : \" + e.message); }\n          }\n          if (stories.length !== it.ns) warn.push(it.label + \" : \" + stories.length + \" bloc(s) texte dans InDesign, \" + it.ns + \" dans la mise en page de l'application\");\n        }\n      });\n    }, ScriptLanguage.JAVASCRIPT, undefined, UndoModes.ENTIRE_SCRIPT, \"Verser les textes (chemin de fer)\");\n    var w2 = []; for (var x = 0; x < warn.length; x++) if (!has(w2, warn[x])) w2.push(warn[x]);\n    alert(done + \" texte(s) vers\u00e9(s), mise en forme de la maquette conserv\u00e9e.\" + lst(\"Non vers\u00e9s\", missing) + lst(\"\u00c0 v\u00e9rifier\", w2) + lst(\"Pages absentes du document\", noPage));\n  }\n\n  // ---------- palette ----------\n  var w = new Window(\"palette\", \"Chemin de fer \u00b7 \" + DATA.book, undefined, { resizeable: true });\n  w.orientation = \"column\"; w.alignChildren = [\"fill\", \"top\"]; w.spacing = 6; w.margins = 10;\n  var help = w.add(\"statictext\", undefined, \"1. Choisissez une page.  2. \u00ab Charger dans le curseur \u00bb, puis cliquez dans les blocs image dans l'ordre voulu (\u00c9chap vide le curseur).  Ou s\u00e9lectionnez un bloc et une photo, puis \u00ab Placer dans le bloc \u00bb.\", { multiline: true });\n  help.preferredSize = [460, 44];\n  w.add(\"statictext\", undefined, \"Pages :\");\n  var pageList = w.add(\"listbox\", undefined, []); pageList.preferredSize = [460, 200];\n  for (var i = 0; i < items.length; i++) {\n    var tN = (items[i].texts || []).length;\n    pageList.add(\"item\", items[i].label + \"  \u2014  \" + items[i].photos.length + \" photo(s)\" + (tN ? \" \u00b7 \" + tN + \" texte(s)\" : \"\"));\n  }\n  w.add(\"statictext\", undefined, \"Photos de la page (ordre de l'application) :\");\n  var photoList = w.add(\"listbox\", undefined, [], { multiselect: true }); photoList.preferredSize = [460, 130];\n  var g1 = w.add(\"group\"); g1.alignment = [\"fill\", \"top\"];\n  var bGo = g1.add(\"button\", undefined, \"Aller \u00e0 la page\");\n  var bGun = g1.add(\"button\", undefined, \"Charger dans le curseur\");\n  var bSel = g1.add(\"button\", undefined, \"Placer dans le bloc\");\n  var g2 = w.add(\"group\"); g2.alignment = [\"fill\", \"top\"];\n  var bAutoPage = g2.add(\"button\", undefined, \"Photos : cette page\");\n  var bAutoAll = g2.add(\"button\", undefined, \"Photos : tout le livre\");\n  var g3 = w.add(\"group\"); g3.alignment = [\"fill\", \"top\"];\n  var bTxtPage = g3.add(\"button\", undefined, \"Textes : cette page\");\n  var bTxtAll = g3.add(\"button\", undefined, \"Textes : tout le livre\");\n  var bClose = g3.add(\"button\", undefined, \"Fermer\");\n  if (!nTexts) { bTxtPage.enabled = false; bTxtAll.enabled = false; }\n  if (!nPhotos) { bGun.enabled = false; bSel.enabled = false; bAutoPage.enabled = false; bAutoAll.enabled = false; }\n  var status = w.add(\"statictext\", undefined, items.length + \" pages \u00b7 \" + nPhotos + \" photo(s) \u00b7 \" + nTexts + \" texte(s).\", { truncate: \"end\" }); status.preferredSize = [460, 18];\n  var cur = null, curFiles = null;\n  function current() { return pageList.selection ? items[pageList.selection.index] : null; }\n  function fillPhotos() {\n    photoList.removeAll(); cur = current(); if (!cur) return;\n    curFiles = [];\n    for (var j = 0; j < cur.photos.length; j++) {\n      var f = baseChecked ? resolve(cur.photos[j]) : null; curFiles.push(f);\n      photoList.add(\"item\", (j + 1) + \". \" + cur.photos[j].split(\"/\").pop() + (cur.slots && cur.slots[j] >= 0 ? \"  \u2192 bloc \" + (cur.slots[j] + 1) : \"\") + (baseChecked && !f ? \"   (introuvable)\" : \"\"));\n    }\n    status.text = cur.label + (cur.event ? \" \u00b7 \" + cur.event.split(\"\\n\")[0] : \"\");\n  }\n  function filesNow() { if (!ensureBase()) return null; curFiles = []; for (var j = 0; j < cur.photos.length; j++) curFiles.push(resolve(cur.photos[j])); return curFiles; }\n  function goTo() { if (!cur) return null; var pg = pageByNumber(cur.page); if (!pg) { status.text = \"Page \" + cur.page + \" absente du document.\"; return null; } try { app.activeWindow.activePage = pg; } catch (e) {} return pg; }\n  function chosenFiles() {\n    var out = []; if (!filesNow()) return out;\n    if (photoList.selection && photoList.selection.length) { for (var k = 0; k < photoList.selection.length; k++) { var f = curFiles[photoList.selection[k].index]; if (f) out.push(f); } }\n    else for (var j = 0; j < curFiles.length; j++) if (curFiles[j]) out.push(curFiles[j]);\n    return out;\n  }\n  pageList.onChange = function () { fillPhotos(); goTo(); };\n  bGo.onClick = function () { if (!cur) { status.text = \"Choisissez d'abord une page.\"; return; } goTo(); };\n  bGun.onClick = function () {\n    if (!cur) { status.text = \"Choisissez d'abord une page.\"; return; }\n    var files = chosenFiles(); if (!files.length) { status.text = \"Aucune photo trouv\u00e9e pour cette page.\"; return; }\n    goTo();\n    try { doc.placeGuns.loadPlaceGun(files, false); status.text = files.length + \" photo(s) dans le curseur : cliquez dans les blocs, dans l'ordre voulu.\"; }\n    catch (e) { alert(\"Le curseur charg\u00e9 n'est pas disponible dans cette version d'InDesign.\\nUtilisez \u00ab Placer dans le bloc \u00bb ou le placement automatique.\\n\\n\" + e.message); }\n  };\n  bSel.onClick = function () {\n    if (!cur) { status.text = \"Choisissez d'abord une page.\"; return; }\n    var files = chosenFiles(); if (!files.length) { status.text = \"S\u00e9lectionnez une photo dans la liste.\"; return; }\n    if (!app.selection.length) { status.text = \"S\u00e9lectionnez d'abord un bloc image dans le document.\"; return; }\n    var fr = app.selection[0];\n    try { if (!(fr instanceof Rectangle || fr instanceof Polygon || fr instanceof Oval) && fr.parent) fr = fr.parent; } catch (e) {}\n    if (!(fr instanceof Rectangle || fr instanceof Polygon || fr instanceof Oval)) { status.text = \"La s\u00e9lection n'est pas un bloc image.\"; return; }\n    app.doScript(function () { fr.place(files[0]); fitIn(fr); }, ScriptLanguage.JAVASCRIPT, undefined, UndoModes.ENTIRE_SCRIPT, \"Placer une photo\");\n    status.text = \"\u00ab \" + decodeURI(files[0].name) + \" \u00bb plac\u00e9e.\";\n    if (photoList.selection && photoList.selection.length) { var nx = photoList.selection[photoList.selection.length - 1].index + 1; photoList.selection = null; if (nx < photoList.items.length) photoList.selection = nx; }\n  };\n  bAutoPage.onClick = function () { if (!cur) { status.text = \"Choisissez d'abord une page.\"; return; } goTo(); autoPlace([cur]); };\n  bAutoAll.onClick = function () { autoPlace(items); };\n  bTxtPage.onClick = function () { if (!cur) { status.text = \"Choisissez d'abord une page.\"; return; } if (!(cur.texts || []).length) { status.text = \"Aucun texte r\u00e9dig\u00e9 pour cette page.\"; return; } goTo(); injectTexts([cur]); };\n  bTxtAll.onClick = function () { injectTexts(items); };\n  bClose.onClick = function () { w.close(); };\n  w.onResizing = w.onResize = function () { this.layout.resize(); };\n  pageList.selection = 0;\n  w.show();\n})();\n";
+const MEP_JSX="// Chemin de fer - conception livre : export des mises en page d'un fichier MEP\n// Installation : Fen\u00eatre > Utilitaires > Scripts, clic droit sur \u00ab Utilisateur \u00bb > Faire appara\u00eetre dans le Finder,\n// copiez ce fichier dans ce dossier. Ouvrez le fichier MEP, puis double-cliquez sur le script dans le panneau Scripts.\n// Le script cr\u00e9e, \u00e0 c\u00f4t\u00e9 du fichier, un dossier \u00ab <nom du fichier> - export MEP \u00bb contenant :\n//   - mep.json : chaque page = une mise en page (blocs photo, blocs texte, formes, superpositions, cha\u00eenages, colonnes, styles)\n//   - un aper\u00e7u basse d\u00e9finition de chaque page (complet, et sans les blocs pour l'application)\n// Glissez ensuite ce dossier sur le livre voulu dans l'application (onglet Mises en page).\n// Le document n'est pas modifi\u00e9 (les blocs masqu\u00e9s le temps de l'aper\u00e7u sont r\u00e9affich\u00e9s).\n#target indesign\n(function () {\n  if (app.documents.length === 0) { alert(\"Ouvrez d'abord le fichier MEP dans InDesign.\"); return; }\n  var doc = app.activeDocument;\n  var docName = String(decodeURI(doc.name)).replace(/\\.indd$/i, \"\");\n  if (!/MEP/i.test(docName) && !confirm(\"\u00ab \" + docName + \" \u00bb n'a pas \u00ab MEP \u00bb dans son nom.\\nL'exporter quand m\u00eame comme fichier de mises en page ?\")) return;\n\n  // ---------- small helpers (ExtendScript has no JSON nor Array.indexOf) ----------\n  function has(a, v) { for (var i = 0; i < a.length; i++) if (a[i] === v) return true; return false; }\n  function r4(n) { return Math.round(n * 10000) / 10000; }\n  function r2(n) { return Math.round(n * 100) / 100; }\n  function J(v) {\n    if (v === null || v === undefined) return \"null\";\n    var t = typeof v;\n    if (t === \"number\") return isFinite(v) ? String(v) : \"null\";\n    if (t === \"boolean\") return v ? \"true\" : \"false\";\n    if (t === \"string\") {\n      var s = \"\\\"\";\n      for (var i = 0; i < v.length; i++) {\n        var c = v.charAt(i), k = v.charCodeAt(i);\n        if (c === \"\\\"\") s += \"\\\\\\\"\"; else if (c === \"\\\\\") s += \"\\\\\\\\\";\n        else if (k === 13) s += \"\\\\r\"; else if (k === 10) s += \"\\\\n\"; else if (k === 9) s += \"\\\\t\";\n        else if (k < 32 || k > 126) { var h = k.toString(16); while (h.length < 4) h = \"0\" + h; s += \"\\\\u\" + h; }\n        else s += c;\n      }\n      return s + \"\\\"\";\n    }\n    if (v instanceof Array) { var a = []; for (var j = 0; j < v.length; j++) a.push(J(v[j])); return \"[\" + a.join(\",\") + \"]\"; }\n    var o = [];\n    for (var key in v) if (v.hasOwnProperty(key) && v[key] !== undefined) o.push(J(key) + \":\" + J(v[key]));\n    return \"{\" + o.join(\",\") + \"}\";\n  }\n  function safe(fn, dflt) { try { var r = fn(); return r === undefined ? dflt : r; } catch (e) { return dflt; } }\n\n  // ---------- where to write ----------\n  var base = safe(function () { return doc.filePath; }, null);\n  if (!base) { base = Folder.selectDialog(\"Ce document n'est pas encore enregistr\u00e9. Choisissez o\u00f9 cr\u00e9er le dossier d'export\"); if (!base) return; }\n  var out = new Folder(base.fsName + \"/\" + docName + \" - export MEP\");\n  if (!out.exists && !out.create()) { alert(\"Impossible de cr\u00e9er le dossier :\\n\" + out.fsName); return; }\n  var old = out.getFiles(\"*.jpg\"); for (var oi = 0; oi < old.length; oi++) safe(function () { old[oi].remove(); });\n\n  // ---------- which images mark the photo blocks (the fixed placeholder image) ----------\n  var linkCount = {}, linkNames = [];\n  function linkOf(fr) { return safe(function () { var g = fr.allGraphics; return g.length ? String(decodeURI(g[0].itemLink.name)) : \"\"; }, \"\"); }\n  var allFrames = doc.allPageItems;\n  for (var ai = 0; ai < allFrames.length; ai++) {\n    var it0 = allFrames[ai];\n    if (!(it0 instanceof Rectangle || it0 instanceof Polygon || it0 instanceof Oval || it0 instanceof TextFrame)) continue;\n    var ln = linkOf(it0); if (!ln) continue;\n    if (!linkCount[ln]) { linkCount[ln] = 0; linkNames.push(ln); } linkCount[ln]++;\n  }\n  linkNames.sort(function (a, b) { return linkCount[b] - linkCount[a]; });\n  var remembered = safe(function () { return doc.extractLabel(\"cdf-placeholders\"); }, \"\");\n  var placeholders = [];\n  if (linkNames.length) {\n    var dlg = new Window(\"dialog\", \"Images t\u00e9moin des blocs photo\");\n    dlg.orientation = \"column\"; dlg.alignChildren = [\"fill\", \"top\"]; dlg.margins = 14; dlg.spacing = 8;\n    dlg.add(\"statictext\", undefined, \"Cochez l'image (ou les images) que vous placez dans les blocs photo de vos mises en page. Les autres images restent du d\u00e9cor.\", { multiline: true }).preferredSize = [420, 36];\n    var boxes = [], list = dlg.add(\"panel\"); list.alignChildren = [\"left\", \"top\"]; list.margins = 10;\n    for (var li = 0; li < linkNames.length && li < 20; li++) {\n      var cb = list.add(\"checkbox\", undefined, linkNames[li] + \"  (\" + linkCount[linkNames[li]] + \" bloc\" + (linkCount[linkNames[li]] > 1 ? \"s\" : \"\") + \")\");\n      cb.value = remembered ? has(remembered.split(\"\\n\"), linkNames[li]) : li === 0;\n      boxes.push(cb);\n    }\n    var bg_ = dlg.add(\"group\"); bg_.alignment = [\"right\", \"top\"];\n    bg_.add(\"button\", undefined, \"Annuler\", { name: \"cancel\" }); bg_.add(\"button\", undefined, \"Exporter\", { name: \"ok\" });\n    if (dlg.show() !== 1) return;\n    for (var bi = 0; bi < boxes.length; bi++) if (boxes[bi].value) placeholders.push(linkNames[bi]);\n    safe(function () { doc.insertLabel(\"cdf-placeholders\", placeholders.join(\"\\n\")); });\n  }\n\n  // ---------- measurements: points, spread origin ----------\n  var vp = doc.viewPreferences;\n  var saved = { h: vp.horizontalMeasurementUnits, v: vp.verticalMeasurementUnits, ro: vp.rulerOrigin, zp: doc.zeroPoint };\n  var jp = app.jpegExportPreferences, jSaved = {};\n  var JP_KEYS = [\"exportingSpread\", \"jpegExportRange\", \"pageString\", \"jpegQuality\", \"exportResolution\", \"jpegColorSpace\", \"antiAlias\", \"useDocumentBleeds\", \"simulateOverprint\"];\n  for (var jk = 0; jk < JP_KEYS.length; jk++) jSaved[JP_KEYS[jk]] = safe(function () { return jp[JP_KEYS[jk]]; }, undefined);\n  var hidden = [];\n  var progress = new Window(\"palette\", \"Export MEP\"); progress.margins = 14;\n  var pText = progress.add(\"statictext\", undefined, \"Lecture des pages\u2026\"); pText.preferredSize = [360, 18];\n  var pBar = progress.add(\"progressbar\", undefined, 0, Math.max(1, doc.pages.length * 3)); pBar.preferredSize = [360, 8];\n  progress.show();\n  var result = { app: \"cdf-mep\", v: 1, doc: docName, at: new Date().toString(), ph: placeholders, pages: [], stories: {} };\n  var nPh = 0, nTx = 0;\n\n  var JUST = [[\"LEFT_ALIGN\", \"l\"], [\"CENTER_ALIGN\", \"c\"], [\"RIGHT_ALIGN\", \"r\"], [\"LEFT_JUSTIFIED\", \"j\"], [\"CENTER_JUSTIFIED\", \"jc\"], [\"RIGHT_JUSTIFIED\", \"jr\"], [\"FULLY_JUSTIFIED\", \"jf\"], [\"TO_BINDING_SIDE\", \"b\"], [\"AWAY_FROM_BINDING_SIDE\", \"a\"]];\n  function just(v) { for (var i = 0; i < JUST.length; i++) if (safe(function () { return v == Justification[JUST[i][0]]; }, false)) return JUST[i][1]; return \"l\"; }\n  function color(c, tint) {\n    return safe(function () {\n      if (!c) return null;\n      var t = (tint === undefined || tint < 0) ? 100 : tint;\n      if (safe(function () { return c instanceof Tint; }, false)) { t = c.tintValue; c = c.baseColor; }\n      if (!safe(function () { return c instanceof Color; }, false)) return null;                 // None, gradients, mixed inks\n      if (/^(Paper|Papier)$/.test(String(c.name))) return { s: \"r\", v: [255, 255, 255], t: 100 };\n      var sp = c.space == ColorSpace.CMYK ? \"c\" : c.space == ColorSpace.RGB ? \"r\" : c.space == ColorSpace.LAB ? \"l\" : \"c\";\n      var v = c.colorValue, o = []; for (var i = 0; i < v.length; i++) o.push(r2(v[i]));\n      return { s: sp, v: o, t: t };\n    }, null);\n  }\n  function capsOf(p) { return safe(function () { return p.capitalization == Capitalization.ALL_CAPS ? \"all\" : p.capitalization == Capitalization.SMALL_CAPS ? \"small\" : (p.capitalization == Capitalization.CAP_TO_SMALL_CAP ? \"small\" : \"\"); }, \"\"); }\n  function paraInfo(p) {\n    var sz = safe(function () { return p.pointSize; }, 10), ld = safe(function () { return p.leading; }, null);\n    if (typeof ld !== \"number\") ld = sz * safe(function () { return p.autoLeading; }, 120) / 100;\n    var txt = safe(function () { return String(p.contents); }, \"\");\n    return {\n      st: safe(function () { return String(p.appliedParagraphStyle.name); }, \"\"),\n      ff: safe(function () { return String(p.appliedFont.fontFamily); }, safe(function () { return String(p.appliedFont).split(\"\\t\")[0]; }, \"\")),\n      fs: safe(function () { return String(p.fontStyle); }, \"Regular\"),\n      sz: r2(sz), ld: r2(ld), al: just(safe(function () { return p.justification; }, null)),\n      col: color(safe(function () { return p.fillColor; }, null), safe(function () { return p.fillTint; }, -1)),\n      caps: capsOf(p), tr: safe(function () { return p.tracking; }, 0),\n      sb: r2(safe(function () { return p.spaceBefore; }, 0)), sa: r2(safe(function () { return p.spaceAfter; }, 0)),\n      fi: r2(safe(function () { return p.firstLineIndent; }, 0)), li: r2(safe(function () { return p.leftIndent; }, 0)), ri: r2(safe(function () { return p.rightIndent; }, 0)),\n      t: txt.replace(/\\r$/, \"\").substr(0, 1500)\n    };\n  }\n  function storyInfo(story) {\n    var ps = story.paragraphs, out_ = [], total = 0;\n    for (var i = 0; i < ps.length && i < 40 && total < 6000; i++) { var pi = paraInfo(ps[i]); total += pi.t.length; out_.push(pi); }\n    return { paras: out_, n: safe(function () { return story.textContainers.length; }, 1) };\n  }\n  function isOnlyGraphic(tf) {\n    return safe(function () { return tf.parentStory.allGraphics.length > 0 && String(tf.parentStory.contents).replace(/[\\s\ufffc]/g, \"\") === \"\"; }, false);\n  }\n  function shapeOf(it, gb) {\n    if (it instanceof Oval) return { sh: \"ov\" };\n    return safe(function () {\n      if (it.paths.length !== 1) return {};\n      var pts = it.paths[0].entirePath, w = gb[3] - gb[1], h = gb[2] - gb[0], o = [], axis = true;\n      for (var i = 0; i < pts.length; i++) {\n        var p = pts[i]; if (p[0] instanceof Array) p = p[1]; // curved point: [left, anchor, right]\n        var x = (p[0] - gb[1]) / w, y = (p[1] - gb[0]) / h;\n        if (!((Math.abs(x) < .002 || Math.abs(x - 1) < .002) && (Math.abs(y) < .002 || Math.abs(y - 1) < .002))) axis = false;\n        o.push([r4(x), r4(y)]);\n      }\n      return (axis && o.length === 4) ? {} : { sh: \"poly\", pts: o };\n    }, {});\n  }\n  function stroke(it) { return safe(function () { var w = it.strokeWeight; if (!w) return null; var c = color(it.strokeColor, it.strokeTint); return c ? { w: r2(w), c: c } : null; }, null); }\n\n  try {\n    vp.horizontalMeasurementUnits = MeasurementUnits.POINTS; vp.verticalMeasurementUnits = MeasurementUnits.POINTS;\n    vp.rulerOrigin = RulerOrigin.SPREAD_ORIGIN; doc.zeroPoint = [0, 0];\n    var pageIdx = 0, step = 0;\n    for (var si = 0; si < doc.spreads.length; si++) {\n      var spread = doc.spreads[si], pages = spread.pages, pb = [];\n      for (var q = 0; q < pages.length; q++) pb.push(pages[q].bounds);\n      var recs = []; for (var q2 = 0; q2 < pages.length; q2++) recs.push([]);\n      var items = spread.allPageItems, N = items.length;\n      for (var ii = 0; ii < N; ii++) {\n        var it = items[ii];\n        var isTF = it instanceof TextFrame;\n        if (!(isTF || it instanceof Rectangle || it instanceof Polygon || it instanceof Oval)) continue;\n        if (safe(function () { return it.parent instanceof Character; }, false)) continue;            // anchored in a text\n        if (safe(function () { return it.visible === false || it.itemLayer.visible === false; }, false)) continue;\n        var kind = null, link = \"\";\n        if (isTF) kind = isOnlyGraphic(it) ? \"ph\" : \"tx\";\n        else {\n          link = linkOf(it);\n          if (link) kind = has(placeholders, link) ? \"ph\" : null;                                    // other images = decoration\n          else if (safe(function () { return it.contentType == ContentType.GRAPHIC_TYPE; }, false)) kind = \"ph\";\n        }\n        if (!kind) continue;\n        var gb = it.geometricBounds, pi_ = -1;\n        for (var q3 = 0; q3 < pb.length; q3++) if (Math.min(gb[3], pb[q3][3]) - Math.max(gb[1], pb[q3][1]) > 0.5 && Math.min(gb[2], pb[q3][2]) - Math.max(gb[0], pb[q3][0]) > 0.5) { pi_ = q3; break; } // straddling: left page\n        if (pi_ < 0) continue;\n        var P = pb[pi_], W = P[3] - P[1], H = P[2] - P[0];\n        var fr = { id: String(it.id), k: kind, x: r4((gb[1] - P[1]) / W), y: r4((gb[0] - P[0]) / H), w: r4((gb[3] - gb[1]) / W), h: r4((gb[2] - gb[0]) / H), z: N - ii };\n        var rot = safe(function () { return it.rotationAngle; }, 0); if (rot) fr.r = r2(rot);\n        var shp = shapeOf(it, gb); if (shp.sh) { fr.sh = shp.sh; if (shp.pts) fr.pts = shp.pts; }\n        var fill = color(safe(function () { return it.fillColor; }, null), safe(function () { return it.fillTint; }, -1)); if (fill) fr.bg = fill;\n        var sk = stroke(it); if (sk) fr.sk = sk;\n        if (kind === \"tx\") {\n          var story = it.parentStory, sid = String(story.id);\n          if (!result.stories[sid]) result.stories[sid] = storyInfo(story);\n          var tc = story.textContainers, ci = 0; for (var c = 0; c < tc.length; c++) if (tc[c].id === it.id) ci = c;\n          var tp = it.textFramePreferences;\n          fr.st = sid; fr.ci = ci; fr.cols = safe(function () { return tp.textColumnCount; }, 1);\n          fr.gut = r2(safe(function () { return tp.textColumnGutter; }, 12));\n          var ins = safe(function () { return tp.insetSpacing; }, 0); fr.ins = ins instanceof Array ? [r2(ins[0]), r2(ins[1]), r2(ins[2]), r2(ins[3])] : [r2(ins), r2(ins), r2(ins), r2(ins)];\n          fr.vj = safe(function () { var v = tp.verticalJustification; return v == VerticalJustification.CENTER_ALIGN ? \"c\" : v == VerticalJustification.BOTTOM_ALIGN ? \"b\" : v == VerticalJustification.JUSTIFY_ALIGN ? \"j\" : \"t\"; }, \"t\");\n          if (safe(function () { return it.overflows; }, false)) fr.ov = true;\n          nTx++;\n        } else { if (link) fr.ln = link; nPh++; }\n        recs[pi_].push({ fr: fr, item: it });\n      }\n      for (var q4 = 0; q4 < pages.length; q4++) {\n        var pg = pages[q4], B = pb[q4];\n        var side = safe(function () { return pg.side == PageSideOptions.LEFT_HAND ? \"l\" : pg.side == PageSideOptions.RIGHT_HAND ? \"r\" : \"s\"; }, \"s\");\n        var frs = []; for (var f = 0; f < recs[q4].length; f++) frs.push(recs[q4][f].fr);\n        pageIdx++; pText.text = \"Page \" + pg.name + \" (\" + pageIdx + \"/\" + doc.pages.length + \")\"; pBar.value = ++step;\n        if (!frs.length) continue;\n        var num = String(pg.documentOffset + 1); while (num.length < 3) num = \"0\" + num;\n        result.pages.push({ pid: String(pg.id), name: String(pg.name), off: pg.documentOffset, side: side, w: r2(B[3] - B[1]), h: r2(B[2] - B[0]), img: \"p\" + num + \".jpg\", bg: \"p\" + num + \"-fond.jpg\", frames: frs, _recs: recs[q4] });\n      }\n    }\n\n    // ---------- low resolution previews: full page, then without the blocks ----------\n    jp.exportingSpread = false; jp.jpegExportRange = ExportRangeOrAllPages.EXPORT_RANGE;\n    safe(function () { jp.jpegQuality = JPEGOptionsQuality.MEDIUM; }); safe(function () { jp.exportResolution = 60; });\n    safe(function () { jp.jpegColorSpace = JpegColorSpaceEnum.RGB; }); safe(function () { jp.antiAlias = true; }); safe(function () { jp.useDocumentBleeds = false; });\n    app.scriptPreferences.enableRedraw = false;\n    for (var e1 = 0; e1 < result.pages.length; e1++) {\n      var rp = result.pages[e1];\n      pText.text = \"Aper\u00e7u de la page \" + rp.name; pBar.value = ++step;\n      jp.pageString = \"+\" + (rp.off + 1);\n      doc.exportFile(ExportFormat.JPG, new File(out.fsName + \"/\" + rp.img), false);\n      var rs = rp._recs;\n      for (var h = 0; h < rs.length; h++) { var item = rs[h].item; if (safe(function () { return item.visible; }, false)) { item.visible = false; hidden.push(item); } }\n      pText.text = \"Fond de la page \" + rp.name; pBar.value = ++step;\n      doc.exportFile(ExportFormat.JPG, new File(out.fsName + \"/\" + rp.bg), false);\n      while (hidden.length) { var hi = hidden.pop(); safe(function () { hi.visible = true; }); }\n      delete rp._recs;\n    }\n  } catch (err) {\n    progress.close();\n    alert(\"L'export s'est arr\u00eat\u00e9 : \" + err.message + (err.line ? \" (ligne \" + err.line + \")\" : \"\"));\n    return;\n  } finally {\n    while (hidden.length) { var hx = hidden.pop(); safe(function () { hx.visible = true; }); }\n    safe(function () { vp.horizontalMeasurementUnits = saved.h; vp.verticalMeasurementUnits = saved.v; vp.rulerOrigin = saved.ro; doc.zeroPoint = saved.zp; });\n    for (var jk2 = 0; jk2 < JP_KEYS.length; jk2++) if (jSaved[JP_KEYS[jk2]] !== undefined) safe(function () { jp[JP_KEYS[jk2]] = jSaved[JP_KEYS[jk2]]; });\n    app.scriptPreferences.enableRedraw = true;\n  }\n  progress.close();\n  var jf = new File(out.fsName + \"/mep.json\"); jf.encoding = \"UTF-8\";\n  if (!jf.open(\"w\")) { alert(\"Impossible d'\u00e9crire \" + jf.fsName); return; }\n  jf.write(J(result)); jf.close();\n  if (confirm(\"Export termin\u00e9 : \" + result.pages.length + \" mises en page (\" + nPh + \" blocs photo, \" + nTx + \" blocs texte).\\n\\nDossier :\\n\" + out.fsName + \"\\n\\nGlissez ce dossier sur le livre dans l'application (onglet Mises en page).\\nOuvrir le dossier maintenant ?\")) out.execute();\n})();\n";
 async function offerFile(filename,data,fallbackText,fallbackName){
   if(!downloads){try{const blob=data instanceof Blob?data:new Blob([data],{type:'text/plain;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000);return}catch(e){}}
   if(downloads){try{await downloads.save({filename,data});return}catch(e){const c=e&&e.code;if(c==='declined')return;if(!['unavailable','not_granted','capability_disabled','capability_removed'].includes(c)){toast("Le fichier n'a pas pu être proposé.");return}}}
@@ -565,7 +598,7 @@ function visibleItems(){
 }
 
 /* ================= routing ================= */
-function readHash(){const h=location.hash.slice(1);if(h.startsWith('livre-')){view.route='livre';view.id=h.slice(6)}else{view.route='avancement';view.id=null}view.sel.clear();view.highlight='';view.active=null;view.menu=false;view.edit=null;view.lpick=null}
+function readHash(){const h=location.hash.slice(1);if(h.startsWith('livre-')){view.route='livre';view.id=h.slice(6)}else{view.route='avancement';view.id=null}view.sel.clear();view.highlight='';view.active=null;view.menu=false;view.edit=null;view.lpick=null;view.plpick=null;view.rsel=null}
 window.addEventListener('hashchange',()=>{readHash();render();window.scrollTo(0,0)});
 
 /* ================= render ================= */
@@ -578,6 +611,7 @@ function render(){
   else app.innerHTML=renderProgress();
   for(const [id,k] of [['pb-scroll','pb'],['ps-scroll','ps'],['tray-list','tr']]){const el=document.getElementById(id);if(el&&keep[k]!=null)el.scrollTop=keep[k]}
   document.documentElement.style.setProperty('--toph',headerH()+'px');observeTiles();renderSelbar();renderPool();if(loaded)saveUI();maybeReopenDir();
+  if(view.route==='livre'&&view.tab==='redac')flowAll();
   if(view.edit){const t=document.getElementById('pe-text');if(t&&document.activeElement!==t){t.focus();t.setSelectionRange(t.value.length,t.value.length)}}
 }
 function renderNav(b){
@@ -591,16 +625,17 @@ function renderNav(b){
 }
 const headerH=()=>(document.querySelector('.top')?.offsetHeight||52);
 const UI_KEY='atelier-ui';
-function saveUI(){const u={hash:location.hash,tab:view.tab,cdfMode:view.cdfMode,active:view.active,lib:{sort:lib.sort,size:lib.size,sub:lib.sub,hideUsed:lib.hideUsed}};const j=JSON.stringify(u);try{sessionStorage.setItem(UI_KEY,j)}catch(e){}try{localStorage.setItem(UI_KEY,j)}catch(e){}}
+function saveUI(){const u={hash:location.hash,tab:view.tab,cdfMode:view.cdfMode,active:view.active,rk:view.rk,plLines:!!view.plLines,lib:{sort:lib.sort,size:lib.size,sub:lib.sub,hideUsed:lib.hideUsed}};const j=JSON.stringify(u);try{sessionStorage.setItem(UI_KEY,j)}catch(e){}try{localStorage.setItem(UI_KEY,j)}catch(e){}}
 function loadUI(){let u=null;try{u=JSON.parse(sessionStorage.getItem(UI_KEY)||'null')}catch(e){}if(!u)try{u=JSON.parse(localStorage.getItem(UI_KEY)||'null')}catch(e){}
   if(!u)return;if(u.tab)view.tab=u.tab;if(u.cdfMode)view.cdfMode=u.cdfMode;if(u.lib)Object.assign(lib,{sort:u.lib.sort||lib.sort,size:u.lib.size||lib.size,sub:u.lib.sub!==false,hideUsed:!!u.lib.hideUsed});
+  if(u.rk!=null)view.rk=u.rk;view.plLines=!!u.plLines;
   if(!location.hash&&u.hash&&u.hash.startsWith('#livre-'))history.replaceState(null,'',u.hash);view._active=u.active}
 const loadingState=()=>`<div class="panel emptystate"><p class="muted">Chargement de vos livres…</p></div>`;
 function observeTiles(){
   if(observer)observer.disconnect();const root=document.getElementById('pb-scroll');if(!root)return;
   observer=new IntersectionObserver(ents=>{for(const e of ents)if(e.isIntersecting){const it=lib.items[+e.target.dataset.idx];if(it)queueThumb(it);observer.unobserve(e.target)}},{root,rootMargin:'300px'});
   root.querySelectorAll('.tile[data-idx]').forEach(t=>{const it=lib.items[+t.dataset.idx];if(it&&!it.thumb)observer.observe(t)});
-  document.querySelectorAll('.athumb[data-tid]').forEach(t=>{const it=lib.items.find(x=>x.id===t.dataset.tid);if(it&&!it.thumb)queueThumb(it)});
+  document.querySelectorAll('.athumb[data-tid],.fr[data-tid]').forEach(t=>{const it=lib.items.find(x=>x.id===t.dataset.tid);if(it&&!it.thumb)queueThumb(it)});
 }
 
 function stChip(bookId,k){const s=books.get(bookId).stages[k]||'todo';return `<button class="stchip st-${s}" data-act="cycle" data-book="${esc(bookId)}" data-stage="${k}" title="Cliquer pour passer à « ${ST[ST[s].next].label} »">${ST[s].label}</button>`}
@@ -623,7 +658,7 @@ function renderProgress(){
     rows+=`<tr class="year"><td colspan="11">${y}</td></tr>`;
     for(const b of list.filter(x=>x.year===y)){
       const m=metrics(b);const p=Math.round(progress(b)*100);
-      const cdfInfo=b.pageCount?`<span class="mono">${m.filled}/${b.pageCount}</span> p. · <span class="mono">${b.layouts.length}</span> MEP${m.placed?` · <span class="mono">${m.placed}</span> ph.`:''}${m.over.length?` · <span class="pill bad">${m.over.length} &gt; ${b.maxReuse}×</span>`:''}${b.pageCount%4?' · <span class="pill bad">pages ≠ ×4</span>':''}`:'<span class="muted">—</span>';
+      const cdfInfo=b.pageCount?`<span class="mono">${m.filled}/${b.pageCount}</span> p. · <span class="mono">${m.nLay}</span> MEP${m.placed?` · <span class="mono">${m.placed}</span> ph.`:''}${m.over.length?` · <span class="pill bad">${m.over.length} &gt; ${b.maxReuse}×</span>`:''}${b.pageCount%4?' · <span class="pill bad">pages ≠ ×4</span>':''}`:'<span class="muted">—</span>';
       rows+=`<tr>
         <td><a class="booklink" href="#livre-${esc(b.id)}">${esc(b.title)}</a></td>
         <td><textarea class="note" rows="1" data-act="note" data-book="${esc(b.id)}" id="note-${esc(b.id)}" aria-label="Statut de ${esc(b.title)}">${esc(b.note)}</textarea></td>
@@ -658,17 +693,17 @@ function renderBook(b){
       <div class="bookmeta">
         <label>Livre <input class="mini mono" type="number" id="bk-year" data-act="year" value="${b.year}" aria-label="Année"></label>
         <label><input class="mini mono" type="number" min="4" step="4" id="bk-pages" data-act="pages" value="${b.pageCount}" aria-label="Nombre de pages"> pages</label>
-        <span class="bk-exp"><button class="btn sm primary" data-act="export-indd" ${m.placed?'':'disabled'} title="${m.placed?'Script InDesign avec les photos placées':'Placez des photos dans Définition des photos pour activer l\'export'}">Export InDesign</button><button class="btn sm" data-act="export-csv" ${m.placed?'':'disabled'}>CSV</button></span>
+        <span class="bk-exp"><button class="btn sm primary" data-act="export-indd" ${m.placed||m.texts?'':'disabled'} title="${m.placed||m.texts?'Script InDesign : photos placées et textes rédigés':'Placez des photos ou rédigez des textes pour activer l\'export'}">Export InDesign</button><button class="btn sm" data-act="export-csv" ${m.placed?'':'disabled'}>CSV</button></span>
       </div>
-      <div class="bookstats"><span><b>${m.filled}/${b.pageCount}</b> pages avec événement</span><span><b>${m.withLay}/${m.sp.length}</b> planches avec mise en page</span><span class="${b.layouts.length<m.needed?'bad':''}"><b>${b.layouts.length}</b> mises en page (${m.needed} min.)</span><span><b>${m.placed}</b> photos placées</span>${alerts?`<span class="bad"><b>${alerts}</b> alerte${alerts>1?'s':''} : ${[m.over.length?m.over.length+' MEP > '+b.maxReuse+'×':'',m.short.length?m.short.length+' évén. sans assez de places photo':''].filter(Boolean).join(', ')}</span>`:''}</div></div>
+      <div class="bookstats"><span><b>${m.filled}/${b.pageCount}</b> pages avec événement</span>${m.PL?`<span><b>${m.withLay}/${b.pageCount}</b> pages avec mise en page</span>`:`<span><b>${m.withLay}/${m.sp.length}</b> planches avec mise en page</span>`}<span class="${m.nLay&&m.nLay<m.needed?'bad':''}"><b>${m.nLay}</b> mises en page (${m.needed} min.)</span>${m.texts?`<span><b>${m.texts}</b> textes</span>`:''}<span><b>${m.placed}</b> photos placées</span>${alerts?`<span class="bad"><b>${alerts}</b> alerte${alerts>1?'s':''} : ${[m.over.length?m.over.length+' MEP > '+b.maxReuse+'×':'',m.short.length?m.short.length+' évén. sans assez de places photo':''].filter(Boolean).join(', ')}</span>`:''}</div></div>
       <button class="btn ghost sm danger ${view.armed==='book'?'armed':''}" data-act="del-book">${view.armed==='book'?'Confirmer la suppression':'Supprimer le livre'}</button></div>`;
   const lo=Math.floor(b.pageCount/4)*4,hi=lo+4;
   const warn=b.pageCount%4?`<div class="warnbar">${b.pageCount} pages n'est pas un multiple de 4.${lo?`<button class="btn sm" data-act="setpages" data-n="${lo}">Passer à ${lo} pages</button>`:''}<button class="btn sm" data-act="setpages" data-n="${hi}">Passer à ${hi} pages</button></div>`:'';
   const tabs=`<div class="tabs" role="tablist">
-      ${[['cdf','Chemin de fer',m.sp.length+' pl.'],['events','Événements',b.events.length],['layouts','Mises en page',b.layouts.length]].map(([k,l,c])=>`<button role="tab" aria-selected="${view.tab===k}" data-act="tab" data-tab="${k}">${l}<span class="count">${c}</span></button>`).join('')}</div>`;
+      ${[['cdf','Chemin de fer',m.sp.length+' pl.'],['events','Événements',b.events.length],['layouts','Mises en page',m.nLay],['redac','Rédaction',m.texts||'']].map(([k,l,c])=>`<button role="tab" aria-selected="${view.tab===k}" data-act="tab" data-tab="${k}">${l}<span class="count">${c}</span></button>`).join('')}</div>`;
   let body='';
   if(view.tab==='cdf')body=view.cdfMode==='photos'?renderPhotos(b,m,ev):renderCdf(b,m,ev);
-  else if(view.tab==='events')body=renderEvents(b,m);else body=renderLayouts(b,m,ev);
+  else if(view.tab==='events')body=renderEvents(b,m);else if(view.tab==='redac')body=renderRedac(b,m,ev);else body=renderPageLayouts(b,m,ev);
   return head+warn+tabs+body;
 }
 const cdfSwitch=()=>`<div class="seg" role="group" aria-label="Vue du chemin de fer"><button data-act="cdfmode" data-mode="plan" aria-pressed="${view.cdfMode==='plan'}">Plan des pages</button><button data-act="cdfmode" data-mode="photos" aria-pressed="${view.cdfMode==='photos'}">Définition des photos</button></div>`;
@@ -707,25 +742,29 @@ function layPicker(b,m,key){
 }
 function renderCdf(b,m,ev){
   if(!b.pageCount)return cdfSwitch()+`<div class="panel emptystate"><h2>Indiquez le nombre de pages</h2><p class="muted">Saisissez le nombre de pages du livre (multiple de 4) sous le titre pour générer les planches, ou importez directement votre chemin de fer Excel.</p><button class="btn primary" data-act="imp-open">Importer depuis Excel…</button></div>`;
-  const lay=layById(b);
+  const lay=layById(b);const PL=usesPL(b),plm=plById(b),pu=plUsage(b);const LAYS=PL?b.pl.filter(l=>!l.gone):b.layouts;
   const tools=`<div class="cdf-tools">${cdfSwitch()}
      <span class="small muted">Clic sur une page : écrire son événement. Glisser un événement sur un autre : fusionner. Le « + » entre deux planches en insère une.</span>
      <span style="flex:1"></span>
-     <label class="row small muted">Repérer <select class="f" id="hl" data-act="highlight"><option value="">Toutes les MEP</option>${b.layouts.map(l=>`<option value="${esc(l.id)}" ${view.highlight===l.id?'selected':''}>${esc(l.name)}</option>`).join('')}<option value="__none" ${view.highlight==='__none'?'selected':''}>Sans mise en page</option></select></label>
+     <label class="row small muted">Repérer <select class="f" id="hl" data-act="highlight"><option value="">Toutes les MEP</option>${LAYS.map(l=>`<option value="${esc(l.id)}" ${view.highlight===l.id?'selected':''}>${esc(l.name)}</option>`).join('')}<option value="__none" ${view.highlight==='__none'?'selected':''}>Sans mise en page</option></select></label>
    </div>`;
-  const palette=b.layouts.length?`<div class="panel palette">${b.layouts.map(l=>{const n=(m.u[l.id]||[]).length;return `<span class="chip ${n>b.maxReuse?'over':n===b.maxReuse?'full-use':''} ${l.locked?'locked':''}" draggable="true" data-drag="layout" data-lay="${esc(l.id)}" title="Glisser sur une planche">${layVisual(l)}${l.locked?I_LOCK:''}${esc(l.name)} <span class="n">${n}/${b.maxReuse}</span></span>`}).join('')}</div>`:'';
+  const palette=PL?(LAYS.length?`<div class="panel palette">${LAYS.map(l=>{const n=(pu[l.id]||[]).length;return `<span class="chip ${n>b.maxReuse?'over':n===b.maxReuse?'full-use':''} ${l.locked?'locked':''}" draggable="true" data-drag="playout" data-pl="${esc(l.id)}" title="${esc(l.src)} · ${plPhotos(l)} photo(s) · glisser sur une page">${l.img?`<span class="cimg"><img src="${esc(imgSrc(l.img))}" alt=""></span>`:''}${l.locked?I_LOCK:''}${esc(l.name)} <span class="n">${n}/${b.maxReuse}</span></span>`}).join('')}</div>`:''):b.layouts.length?`<div class="panel palette">${b.layouts.map(l=>{const n=(m.u[l.id]||[]).length;return `<span class="chip ${n>b.maxReuse?'over':n===b.maxReuse?'full-use':''} ${l.locked?'locked':''}" draggable="true" data-drag="layout" data-lay="${esc(l.id)}" title="Glisser sur une planche">${layVisual(l)}${l.locked?I_LOCK:''}${esc(l.name)} <span class="n">${n}/${b.maxReuse}</span></span>`}).join('')}</div>`:'';
   const cards=m.sp.map(s=>{
-    const lid=b.spreads[s.key];const l=lay[lid];const n=l?(m.u[l.id]||[]).length:0;
-    const dim=view.highlight&&(view.highlight==='__none'?!!l:view.highlight!==lid);
-    const placed=(b.assign[s.key]||[]).length;const pinned=!!b.pins[s.key];
-    return `<article class="spread ${dim?'dim':''} ${l&&n>b.maxReuse?'over-limit':''}" data-key="${s.key}" data-drop="spread">
+    const lid=b.spreads[s.key];const l=PL?null:lay[lid];const n=l?(m.u[l.id]||[]).length:0;
+    const pgs=[s.l,s.r].filter(Boolean);const pls=PL?[s.l,s.r].map(p=>p?plm[b.pageLay[p]]:null):[];
+    const dim=view.highlight&&(PL?(view.highlight==='__none'?pgs.every(p=>plm[b.pageLay[p]]):!pls.some(x=>x&&x.id===view.highlight)):(view.highlight==='__none'?!!l:view.highlight!==lid));
+    const overPL=PL&&pls.some(x=>x&&(pu[x.id]||[]).length>b.maxReuse);
+    const placed=(b.assign[s.key]||[]).length;const pinned=!!b.pins[s.key];const capPL=PL?pls.reduce((a,x)=>a+plPhotos(x),0):0;
+    const slot=(p,x)=>{if(!p)return '<span class="pls none-pg"></span>';const k=x?(pu[x.id]||[]).length:0;return `<button class="pls ${x?'':'empty'} ${x&&k>b.maxReuse?'bad':''}" data-act="plpick" data-page="${p}" data-drop="pgl" ${x?'draggable="true" data-drag="pagelay"':''} title="${x?`${esc(x.name)} · ${plPhotos(x)} photo(s) · ${k}/${b.maxReuse} · clic : changer · glisser sur une autre page : échanger`:`Page ${p} : choisir une mise en page`}">${x?(x.img?`<img src="${esc(imgSrc(x.img))}" alt="">`:esc(x.name.slice(0,3))):'+'}</button>`};
+    return `<article class="spread ${dim?'dim':''} ${(l&&n>b.maxReuse)||overPL?'over-limit':''}" data-key="${s.key}" data-drop="spread">
       ${s.key>=2?`<button class="ins" data-act="ins-pl" data-key="${s.key}" title="Insérer une planche vide avant la planche ${plancheNo(s.key)}" aria-label="Insérer une planche avant la planche ${plancheNo(s.key)}">+</button>`:''}
       <div class="sp-top"><span class="sp-label" data-drop="plmove" data-pl="${plancheNo(s.key)}" title="Déposez ici un événement pour le déplacer sur cette planche">Pl. ${plancheNo(s.key)}</span><input class="spname" id="spn-${s.key}" data-act="spread-name" data-key="${s.key}" value="${esc(b.spreadNames[s.key]||'')}" placeholder="Nommer la planche" aria-label="Nom de la planche ${plancheNo(s.key)}">${(()=>{const pk=s.key===0?null:s.key===2?0:s.key-2;const pn=pk!=null&&b.spreadNames[pk];return pn&&pn!==b.spreadNames[s.key]?`<button class="spprev" data-act="sp-prev" data-key="${s.key}" title="Reprendre le nom de la planche précédente : « ${esc(pn)} »">↶ ${esc(pn.length>14?pn.slice(0,13)+'…':pn)}</button>`:''})()}<button class="pin ${pinned?'on':''}" data-act="pin" data-key="${s.key}" title="${pinned?'Planche verrouillée : la répartition automatique n\'y touche pas':'Verrouiller cette planche'}" aria-pressed="${pinned}">${pinned?I_LOCK:I_UNLOCK}</button></div>
-      <div class="pair">${l?`<div class="pair-bg" aria-hidden="true">${layVisual(l)}</div>`:''}${(s.l&&s.r&&b.pages[s.l]&&b.pages[s.l]===b.pages[s.r]&&ev[b.pages[s.l]])?wideCell(b,s,ev[b.pages[s.l]]):pageCell(b,s.l,'left',ev)+pageCell(b,s.r,'right',ev)}</div>
-      <div class="sp-foot"><button class="thumb lthumb ${l?'':'none'}" data-act="lpick" data-key="${s.key}" ${l?`draggable="true" data-drag="spreadlay"`:''} title="${l?esc(l.name)+' · clic : changer · glisser vers une autre planche : échanger':'Choisir une mise en page'}">${l?layVisual(l):'<span>+ MEP</span>'}</button>
+      <div class="pair">${PL?(pls.some(Boolean)?`<div class="pair-bg pl" aria-hidden="true"><div>${pls[0]&&pls[0].img?`<img src="${esc(imgSrc(pls[0].img))}" alt="">`:''}</div><div>${pls[1]&&pls[1].img?`<img src="${esc(imgSrc(pls[1].img))}" alt="">`:''}</div></div>`:''):l?`<div class="pair-bg" aria-hidden="true">${layVisual(l)}</div>`:''}${(s.l&&s.r&&b.pages[s.l]&&b.pages[s.l]===b.pages[s.r]&&ev[b.pages[s.l]])?wideCell(b,s,ev[b.pages[s.l]]):pageCell(b,s.l,'left',ev)+pageCell(b,s.r,'right',ev)}</div>
+      ${PL?`<div class="sp-foot pl"><span class="pls-pair">${slot(s.l,pls[0])}${slot(s.r,pls[1])}</span><span class="lcount small">${pls.filter(Boolean).map(x=>esc(x.name)).join(' · ')}</span><span class="ph" title="Photos placées / blocs photo des mises en page">${placed||'–'}/${capPL||'–'}</span></div>
+      ${view.plpick!=null&&pgs.includes(view.plpick)?plPicker(b,view.plpick):''}`:`<div class="sp-foot"><button class="thumb lthumb ${l?'':'none'}" data-act="lpick" data-key="${s.key}" ${l?`draggable="true" data-drag="spreadlay"`:''} title="${l?esc(l.name)+' · clic : changer · glisser vers une autre planche : échanger':'Choisir une mise en page'}">${l?layVisual(l):'<span>+ MEP</span>'}</button>
         <span class="lcount mono ${n>b.maxReuse?'bad':''}" title="${l?esc(l.name)+' : utilisée '+n+' fois sur '+b.maxReuse:'Aucune mise en page'}">${l?n+'/'+b.maxReuse:''}</span>
         <span class="ph" title="Photos placées / places dans la mise en page">${placed||'–'}/${l&&l.photos?l.photos:'–'}</span></div>
-      ${view.lpick===s.key?layPicker(b,m,s.key):''}
+      ${view.lpick===s.key?layPicker(b,m,s.key):''}`}
     </article>`}).join('');
   return tools+palette+`<div class="cdf">${cards}</div>`;
 }
@@ -767,6 +806,7 @@ function extendEvent(b,evId,q){
     const k=spreadKeyOf(q);const keep=new Set([k,k+1].filter(p=>p!==q&&b.pages[p]===evId)); // the event's own page in this planche stays put
     const np={};for(const [p,e] of Object.entries(b.pages)){const n=+p;np[n>=q&&n<G&&!keep.has(n)?n+2:n]=e}b.pages=np;
     for(const mp of SPREAD_MAPS){if(!b[mp])continue;const nm={};for(const [kk,v] of Object.entries(b[mp])){const n=+kk;nm[n>0&&n>q&&n<G?n+2:n]=v}b[mp]=nm}
+    remapPages(b,n=>n>=q&&n<G&&!keep.has(n)?n+2:n);
   }
   b.pages[q]=evId;
   const max=Math.max(0,...Object.keys(b.pages).map(Number));let grew='';if(max>b.pageCount){b.pageCount=Math.ceil(max/4)*4;grew=` · le livre passe à ${b.pageCount} pages`}
@@ -775,7 +815,7 @@ function extendEvent(b,evId,q){
 function renderPhotos(b,m,ev){
   if(!b.pageCount)return cdfSwitch();
   ensureLibFor(b);
-  const lay=layById(b);
+  const lay=layById(b);const PL=usesPL(b),plm=plById(b);
   if(view.active==null||!m.sp.some(s=>s.key===view.active))view.active=m.sp[0].key;
   const top=`<div class="cdf-tools" id="photos-top">${cdfSwitch()}</div>`;
   let left;
@@ -825,17 +865,19 @@ function renderPhotos(b,m,ev){
   }
   const evOpts=b.events.map(e=>`<option value="${esc(e.id)}" ${view.psEvent===e.id?'selected':''}>${esc(e.name.split('\n')[0].slice(0,50))}</option>`).join('');
   const rows=m.sp.filter(s=>!view.psEvent||spreadPages(b,s.key).some(p=>b.pages[p]===view.psEvent)).map(s=>{
-    const pages=spreadPages(b,s.key);const evs=[...new Set(pages.map(p=>ev[b.pages[p]]).filter(Boolean))];const l=lay[b.spreads[s.key]];const arr=b.assign[s.key]||[];
-    const cap=l&&l.photos?l.photos:0;const cls=!cap?'':arr.length===cap?'ok':arr.length>cap?'bad':'';
+    const pages=spreadPages(b,s.key);const evs=[...new Set(pages.map(p=>ev[b.pages[p]]).filter(Boolean))];const l=PL?null:lay[b.spreads[s.key]];const arr=b.assign[s.key]||[];
+    const lps=PL?pages.map(p=>plm[b.pageLay[p]]):[];const cap=PL?lps.reduce((a,x)=>a+plPhotos(x),0):(l&&l.photos?l.photos:0);const cls=!cap?'':arr.length===cap?'ok':arr.length>cap?'bad':'';
     return `<section class="psr ${view.active===s.key?'active':''}" data-drop="psr" data-key="${s.key}">
       <div class="psr-h" data-act="activate" data-key="${s.key}"><span class="lbl" data-drop="plmove" data-pl="${plancheNo(s.key)}" title="${esc(spreadLabel(b,s.key))} · déposez un événement ici pour le déplacer sur cette planche">Pl. ${plancheNo(s.key)}</span>
         <div class="evcs">${evs.map(e=>`<div class="evc" data-drop="evmerge" data-ev="${esc(e.id)}" style="--h:${e.hue}"><span class="grip" draggable="true" data-drag="evmove" data-ev="${esc(e.id)}" title="Glisser sur un autre événement pour fusionner, sur un n° de planche pour déplacer, sur la corbeille pour désassigner" aria-label="Déplacer l'événement">⋮⋮</span><textarea class="evname" rows="1" id="psn-${s.key}-${esc(e.id)}" data-act="ev-name" data-ev="${esc(e.id)}" aria-label="Texte de l'événement">${esc(e.name)}</textarea>${sidePicto(b,e,s.key)}</div>`).join('')||'<span class="small muted">Sans événement</span>'}</div>
-        <span class="cnt ${cls}" title="Photos placées / places dans ${l?esc(l.name):'la mise en page'}">${arr.length}/${cap||'–'}</span></div>
-      <div class="psr-b2 ${s.key===0?'single':''} ${arr.length?'':'empty'}">${(s.key===0?['r']:['l','r']).map(side=>{
-        const list=arr.map((a,i)=>({a,i})).filter(x=>photoSide(s.key,x.a)===side);const pg=side==='l'?s.l:s.r;
-        return `<div class="pz ${view.active===s.key&&defaultSide(s.key)===side?'act':''}" data-drop="psr" data-key="${s.key}" data-side="${side}" data-act="activate-side" title="Page ${side==='l'?'gauche':'droite'} ${pg||''} : glissez des photos ici">
-          <span class="pz-l">${side==='l'?'Gauche':'Droite'} · p. ${pg||'–'}${list.length?` · ${list.length} ph.`:''}</span>${pg&&ev[b.pages[pg]]?`<span class="pz-t">${esc(ev[b.pages[pg]].name)}</span>`:''}
-          ${list.map(({a,i},j)=>{const it=lib.byPath.get(a.p);return `<div class="athumb ${it?'':'missing'}" draggable="true" data-drag="assigned" data-key="${s.key}" data-idx="${i}" ${it?`data-tid="${it.id}"`:''} title="${esc(a.p)}">${it&&it.thumb?thumbImg(it):`<span class="nm">${esc(baseName(a.p))}</span>`}<span class="ord">${j+1}</span><button class="x" data-act="unassign" data-key="${s.key}" data-idx="${i}" aria-label="Retirer">×</button></div>`}).join('')}</div>`}).join('')}</div>
+        <span class="cnt ${cls}" title="Photos placées / ${PL?'blocs photo des mises en page':'places dans '+(l?esc(l.name):'la mise en page')}">${arr.length}/${cap||'–'}</span></div>
+      <div class="psr-b2 ${s.key===0?'single':''} ${arr.length||lps.some(Boolean)?'':'empty'}">${(s.key===0?['r']:['l','r']).map(side=>{
+        const list=arr.map((a,i)=>({a,i})).filter(x=>photoSide(s.key,x.a)===side);const pg=side==='l'?s.l:s.r;const lp=PL&&pg?plm[b.pageLay[pg]]:null;
+        let inner;if(lp){const F=pageFill(lp,list);inner=`<div class="pz-mep">${plBlocks(lp,F,s.key,side)}</div>${F.extra.length?`<div class="pz-extra"><span class="pz-l">En trop :</span>${F.extra.map(({a,i})=>athumbHtml(s.key,a,i)).join('')}</div>`:''}`}
+        else inner=list.map(({a,i},j)=>athumbHtml(s.key,a,i,j)).join('');
+        return `<div class="pz ${view.active===s.key&&defaultSide(s.key)===side?'act':''}" data-drop="psr" data-key="${s.key}" data-side="${side}" data-act="activate-side" title="Page ${side==='l'?'gauche':'droite'} ${pg||''} : glissez des photos ici${lp?' ou directement dans un bloc':''}">
+          <span class="pz-l">${side==='l'?'Gauche':'Droite'} · p. ${pg||'–'}${list.length||lp?` · ${list.length}${lp?'/'+plPhotos(lp):''} ph.`:''}${PL&&pg?`<button class="pz-btn" data-act="plpick" data-page="${pg}" title="Changer la mise en page de la page ${pg}">${lp?esc(lp.name):'+ MEP'}</button>`:''}</span>${pg&&ev[b.pages[pg]]?`<span class="pz-t">${esc(ev[b.pages[pg]].name)}</span>`:''}
+          ${inner}${PL&&pg&&view.plpick===pg?plPicker(b,pg):''}</div>`}).join('')}</div>
     </section>`}).join('');
   const right=`<div class="panel pane">
     <div class="pane-bar compact"><div class="strip">
@@ -858,10 +900,11 @@ function mergeEvents(b,srcId,dstId){
 function dropOrphans(b){const used=new Set(Object.values(b.pages));b.events=b.events.filter(e=>used.has(e.id)||e.photos>0)}
 function insertPlanche(b,key){
   remember(b);const busyAt=p=>!!b.pages[p];
-  let G=null;for(let g=key;;g+=2){if(g>Math.max(b.pageCount,...Object.keys(b.pages).map(Number))+1){G=g;break}if(!busyAt(g)&&!busyAt(g+1)&&!b.spreads[g]&&!(b.assign[g]||[]).length){G=g;break}}
+  let G=null;for(let g=key;;g+=2){if(g>Math.max(b.pageCount,...Object.keys(b.pages).map(Number))+1){G=g;break}if(!busyAt(g)&&!busyAt(g+1)&&!b.spreads[g]&&!b.pageLay[g]&&!b.pageLay[g+1]&&!(b.assign[g]||[]).length){G=g;break}}
   if(G===key){toast('Cette planche est déjà vide.');return}
   const np={};for(const [p,e] of Object.entries(b.pages)){const n=+p;np[n>=key&&n<G?n+2:n]=e}b.pages=np;
   for(const mp of SPREAD_MAPS){if(!b[mp])continue;const nm={};for(const [k,v] of Object.entries(b[mp])){const n=+k;nm[n>0&&n>=key&&n<G?n+2:n]=v}b[mp]=nm}
+  remapPages(b,n=>n>=key&&n<G?n+2:n);
   const max=Math.max(0,...Object.keys(b.pages).map(Number));let grew='';if(max>b.pageCount){b.pageCount=Math.ceil(max/4)*4;grew=` · le livre passe à ${b.pageCount} pages`}
   save(b);toastUndo(`Planche vide insérée en planche ${plancheNo(key)}${grew}`);
 }
@@ -943,6 +986,322 @@ function renderLayouts(b,m,ev){
   const grid=`<div class="lays">${cards}${tray.items.length?`<div class="newlay" data-drop="newlay">Déposez une image ici pour créer une nouvelle mise en page</div>`:''}</div>`;
   return calc+actions+(b.layouts.length||tray.items.length?`<div class="layzone ${tray.items.length?'with-tray':''}">${trayHtml}${grid}</div>`:`<div class="panel emptystate"><h2>Aucune mise en page</h2><p class="muted">Importez le dossier où sont rangées vos mises en page, puis attribuez à chacune son image de gauche et de droite.</p><button class="btn primary" data-act="pick-laydir">${I_FOLDER} Importer le dossier des mises en page</button></div>`);
 }
+
+/* ================= page layouts: each page of a MEP file exported from InDesign ================= */
+const usesPL=b=>b.pl.length>0||!b.layouts.length;
+function plById(b){const m={};b.pl.forEach(l=>m[l.id]=l);return m}
+function plUsage(b){const u={};for(let p=1;p<=b.pageCount;p++){const id=b.pageLay[p];if(id)(u[id]=u[id]||[]).push(p)}return u}
+const phFrames=l=>l&&l.frames?l.frames.filter(f=>f.k==='ph').sort((a,z)=>a.o-z.o):[];
+const plPhotos=l=>phFrames(l).length;
+const plTexts=l=>l&&l.stories?Object.keys(l.stories).length:0;
+const pageSideOf=p=>p===1||p%2===1?'r':'l';
+const pct=v=>(+v*100).toFixed(3)+'%';
+const cq=(pt,W)=>`${(pt/W*100).toFixed(4)}cqw`;
+function frStyle(f){let s=`left:${pct(f.x)};top:${pct(f.y)};width:${pct(f.w)};height:${pct(f.h)};z-index:${f.z||1};`;
+  if(f.sh==='poly'&&f.pts&&f.pts.length>2)s+=`clip-path:polygon(${f.pts.map(([x,y])=>pct(x)+' '+pct(y)).join(',')});`;return s}
+function labRgb(L,a,bb){let y=(L+16)/116,x=a/500+y,z=y-bb/200;const f=t=>t**3>0.008856?t**3:(t-16/116)/7.787;x=0.95047*f(x);y=f(y);z=1.08883*f(z);
+  const r=x*3.2406-y*1.5372-z*0.4986,g=-x*0.9689+y*1.8758+z*0.0415,b_=x*0.0557-y*0.2040+z*1.0570;const c=v=>255*Math.max(0,Math.min(1,v>0.0031308?1.055*v**(1/2.4)-0.055:12.92*v));return [c(r),c(g),c(b_)]}
+function cssColor(c){if(!c||!c.v)return '';let rgb;const v=c.v;
+  if(c.s==='r')rgb=v.slice(0,3);else if(c.s==='l')rgb=labRgb(v[0],v[1],v[2]);else{const [C,M,Y,K]=v.map(x=>(x||0)/100);rgb=[255*(1-C)*(1-K),255*(1-M)*(1-K),255*(1-Y)*(1-K)]}
+  const t=(c.t==null||c.t<0?100:c.t)/100;return `rgb(${rgb.map(x=>Math.round(255-(255-x)*t)).join(',')})`}
+// Small preview of a page layout (image exported by InDesign), with the blocks outlined if asked
+function plThumb(l,lines){if(!l)return '';const src=imgSrc(l.img);
+  return `<div class="plv" style="aspect-ratio:${l.w}/${l.h}">${src?`<img class="plv-bg" src="${esc(src)}" alt="" loading="lazy">`:''}${lines?l.frames.map(f=>f.k==='ph'?`<div class="fr lin ph" style="${frStyle(f)}">${f.o+1}</div>`:`<div class="fr lin tx" style="${frStyle(f)}">${f.cols>1?f.cols+' col.':'T'}</div>`).join(''):''}</div>`}
+// Which photo goes in which block: photos dropped on a block keep it, the others fill the empty blocks in reading order
+function pageFill(l,entries){
+  const frs=phFrames(l),map=new Map(),used=new Set();
+  for(const e of entries)if(e.a.f&&!map.has(e.a.f)&&frs.some(f=>f.id===e.a.f)){map.set(e.a.f,e);used.add(e)}
+  let fi=0;const extra=[];
+  for(const e of entries){if(used.has(e))continue;while(fi<frs.length&&map.has(frs[fi].id))fi++;if(fi<frs.length)map.set(frs[fi].id,e);else extra.push(e)}
+  return {frs,map,extra};
+}
+const sideEntries=(b,key,side)=>(b.assign[key]||[]).map((a,i)=>({a,i})).filter(x=>photoSide(key,x.a)===side);
+const pageOfSide=(key,side)=>+key===0?1:(side==='l'?+key:+key+1);
+function athumbHtml(key,a,i,j){const it=lib.byPath.get(a.p);return `<div class="athumb ${it?'':'missing'}" draggable="true" data-drag="assigned" data-key="${key}" data-idx="${i}" ${it?`data-tid="${it.id}"`:''} title="${esc(a.p)}">${it&&it.thumb?thumbImg(it):`<span class="nm">${esc(baseName(a.p))}</span>`}${j!=null?`<span class="ord">${j+1}</span>`:''}<button class="x" data-act="unassign" data-key="${key}" data-idx="${i}" aria-label="Retirer">×</button></div>`}
+function plBlocks(l,F,key,side){
+  const src=imgSrc(l.img);
+  return `<div class="plv" style="aspect-ratio:${l.w}/${l.h}">${src?`<img class="plv-bg" src="${esc(src)}" alt="">`:''}${F.frs.map((f,j)=>{const e=F.map.get(f.id);const it=e&&lib.byPath.get(e.a.p);
+    return `<div class="fr ph ${f.sh==='ov'?'ov':''} ${e?'full':''}" data-drop="blk" data-key="${key}" data-side="${side}" data-f="${esc(f.id)}" style="${frStyle(f)}" ${e?`draggable="true" data-drag="assigned" data-key="${key}" data-idx="${e.i}" ${it?`data-tid="${it.id}"`:''} title="${esc(e.a.p)} · glisser dans un autre bloc pour échanger"`:`title="Bloc ${j+1} : déposez une photo"`}>${e?(it&&it.thumb?thumbImg(it):`<span class="nm">${esc(baseName(e.a.p))}</span>`)+`<button class="x" data-act="unassign" data-key="${key}" data-idx="${e.i}" aria-label="Retirer">×</button>`:j+1}</div>`}).join('')}</div>`;
+}
+function plPicker(b,page){
+  const u=plUsage(b);const cur_=b.pageLay[page];const side=pageSideOf(page);const srcs=[...new Set(b.pl.map(l=>l.src))];
+  return `<div class="plpick panel" role="dialog" aria-label="Mise en page de la page ${page}"><div class="small"><b>Page ${page}</b> <span class="muted">(${side==='l'?'gauche':'droite'}) · les mises en page de ce côté d'origine d'abord</span></div>
+    <div class="plpick-grid">${srcs.map(src=>(srcs.length>1?`<h5>${esc(src)}</h5>`:'')+b.pl.filter(l=>l.src===src&&!l.gone).sort((a,z)=>((a.side===side?0:1)-(z.side===side?0:1))||(a.order-z.order)).map(l=>{const n=(u[l.id]||[]).length;const full=n>=b.maxReuse&&l.id!==cur_;
+      return `<button class="lp ${l.id===cur_?'on':''}" data-act="pl-set" data-page="${page}" data-pl="${esc(l.id)}" ${full?`disabled title="Déjà utilisée ${n} fois"`:''}>${plThumb(l)}<span class="lp-n">${l.locked?I_LOCK:''}${esc(l.name)}</span><span class="lp-u mono">${plPhotos(l)} ph. · ${n}/${b.maxReuse}</span></button>`}).join('')).join('')||'<p class="small muted">Aucune mise en page : importez un export MEP dans l\'onglet Mises en page.</p>'}</div>
+    ${cur_?`<button class="btn ghost sm" data-act="pl-set" data-page="${page}" data-pl="">Retirer la mise en page</button>`:''}</div>`;
+}
+function autoAssignPL(b){
+  const u=plUsage(b),max=b.maxReuse,ev=evById(b),ep=eventPages(b);const cnt={};b.pl.forEach(l=>cnt[l.id]=(u[l.id]||[]).length);
+  const pool=b.pl.filter(l=>!l.locked&&!l.gone);let n=0;
+  for(let p=1;p<=b.pageCount;p++){if(b.pageLay[p]||b.pins[spreadKeyOf(p)])continue;
+    const side=pageSideOf(p);const near=new Set([b.pageLay[p-1],b.pageLay[p+1],b.pageLay[p-2],b.pageLay[p+2]].filter(Boolean));
+    const e=ev[b.pages[p]];const want=e&&e.photos?e.photos/Math.max(1,(ep[e.id]||[]).length):0;
+    let c=pool.filter(l=>cnt[l.id]<max&&!near.has(l.id));if(!c.length)c=pool.filter(l=>cnt[l.id]<max);if(!c.length)continue;
+    c.sort((a,z)=>((a.side===side?0:1)-(z.side===side?0:1))||(want?Math.abs(plPhotos(a)-want)-Math.abs(plPhotos(z)-want):0)||cnt[a.id]-cnt[z.id]||Math.random()-.5);
+    b.pageLay[p]=c[0].id;cnt[c[0].id]++;n++}
+  return n;
+}
+const MEP_SCRIPT_NAME='Export MEP - Chemin de fer.jsx';
+function renderPageLayouts(b,m,ev){
+  const max=b.maxReuse,u=plUsage(b);const needed=b.pageCount?Math.ceil(b.pageCount/max):0;
+  let free=0;for(let p=1;p<=b.pageCount;p++)if(!b.pageLay[p])free++;
+  const live=b.pl.filter(l=>!l.gone);const over=b.pl.filter(l=>(u[l.id]||[]).length>max);
+  const calc=`<div class="panel calc">
+      <span class="big"><span class="mono">${b.pageCount}</span> pages → <em>${needed} mises en page minimum</em></span>
+      <label class="small muted row" style="gap:6px">Réutilisation max d'une mise en page <input class="f mono" style="width:60px;padding:3px 6px" type="number" min="1" id="bk-max" data-act="maxreuse" value="${b.maxReuse}"></label>
+      <span class="small muted">Importées : <b class="mono">${live.length}</b>${live.length&&live.length<needed?` (il en manque <b class="mono" style="color:var(--bad)">${needed-live.length}</b>)`:''} · ${free} page${free>1?'s':''} sans mise en page${over.length?` · <span class="pill bad">${over.map(l=>esc(l.name)).join(', ')} &gt; ${max}×</span>`:''}</span></div>`;
+  const actions=`<div class="lay-actions">
+      <button class="btn primary" data-act="mep-pick">${I_FOLDER} Importer un export MEP</button>
+      <button class="btn" data-act="mep-script" title="Script InDesign qui exporte les blocs et les aperçus d'un fichier MEP">Script d'export InDesign</button>
+      <button class="btn" data-act="auto" ${!live.length||!free?'disabled':''}>Remplir les ${free} pages libres</button>
+      <button class="btn ${view.armed==='redistribute'?'armed':''}" data-act="redistribute" ${live.length?'':'disabled'}>${view.armed==='redistribute'?'Confirmer : tout redistribuer':'Tout redistribuer'}</button>
+      <label class="check"><input type="checkbox" id="pl-lines" data-act="pl-lines" ${view.plLines?'checked':''}> Afficher les blocs</label>
+      <span class="small muted" style="flex-basis:100%">Chaque page d'un fichier MEP devient une mise en page, utilisable à gauche comme à droite, ${max} fois au plus. La répartition ignore les mises en page verrouillées ${I_LOCK} et les planches verrouillées.</span></div>`;
+  const srcs=[...new Set(b.pl.map(l=>l.src))];
+  const card=l=>{const used=u[l.id]||[];const n=used.length;const tx=l.frames.filter(f=>f.k==='tx');const cols=Math.max(1,...tx.map(f=>f.cols||1));const chained=Object.values(l.stories||{}).some(s=>s.n>1);
+    return `<article class="panel plc ${n>max?'over':''} ${l.locked?'locked':''} ${l.gone?'gone':''}">
+      <div class="plc-prev" draggable="true" data-drag="playout" data-pl="${esc(l.id)}" title="Glisser sur une page du plan">${plThumb(l,view.plLines)}</div>
+      <div class="plc-body">
+        <input class="f" id="pln-${esc(l.id)}" data-act="pl-name" data-pl="${esc(l.id)}" value="${esc(l.name)}" aria-label="Nom de la mise en page">
+        <div class="plc-info"><span>${plPhotos(l)} photo${plPhotos(l)>1?'s':''}</span><span>${tx.length} bloc${tx.length>1?'s':''} texte</span>${cols>1?`<span>${cols} colonnes</span>`:''}${chained?'<span>chaîné</span>':''}<span>${l.side==='l'?'gauche':l.side==='r'?'droite':'page seule'} d'origine</span>${l.gone?'<span class="bad">absente du dernier export</span>':''}</div>
+        <div class="lay-line"><div class="usage" style="flex:1"><b style="color:${n>max?'var(--bad)':'inherit'}">${n}/${max}</b><div class="bar ${n>max?'bad':n===max?'ok':''}"><i style="width:${Math.min(100,n/max*100)}%"></i></div></div>
+          <button class="icon-btn ${l.locked?'on':''}" data-act="pl-lock" data-pl="${esc(l.id)}" aria-pressed="${!!l.locked}" title="${l.locked?'Verrouillée : jamais attribuée automatiquement':'Verrouiller (sommaire, page de garde, 4e de couverture, sur mesure…)'}">${l.locked?I_LOCK:I_UNLOCK}</button>
+          <button class="icon-btn ${view.armed==='pl:'+l.id?'armed':''}" data-act="pl-del" data-pl="${esc(l.id)}" title="${view.armed==='pl:'+l.id?'Cliquer à nouveau pour supprimer':'Supprimer'}" aria-label="Supprimer">${I_TRASH}</button></div>
+        ${used.length?`<div class="uses">${used.map(p=>{const e=ev[b.pages[p]];return `<button data-act="goto-page" data-page="${p}" title="${e?esc(e.name):'Sans événement'}">p. ${p}</button>`}).join('')}</div>`:''}
+      </div></article>`};
+  const groups=srcs.map(src=>{const ls=b.pl.filter(l=>l.src===src).sort((a,z)=>a.order-z.order);const info=(b.mepSrc||{})[src];
+    return `<section class="mepgrp"><div class="mepgrp-h"><h3>${esc(src)}</h3><span class="small muted">${ls.length} mise${ls.length>1?'s':''} en page${info&&info.at?' · importé le '+esc(fmtVer(info.at)):''}</span><span style="flex:1"></span><button class="btn ghost sm danger ${view.armed==='src:'+src?'armed':''}" data-act="mep-src-del" data-src="${esc(src)}">${view.armed==='src:'+src?'Confirmer : retirer ce fichier':'Retirer ce fichier'}</button></div>
+      <div class="plcs">${ls.map(card).join('')}</div></section>`}).join('');
+  const drop=`<div class="mepdrop" data-drop="mepdir">Glissez ici le dossier « … - export MEP » créé par le script InDesign. Un nouvel export du même fichier met à jour ses mises en page sans toucher aux pages où elles sont posées.</div>`;
+  const empty=`<div class="panel emptystate" data-drop="mepdir"><h2>Importer les mises en page du fichier MEP</h2>
+      <ol class="steps"><li><span>Téléchargez le <b>script d'export</b> et copiez-le dans InDesign (Fenêtre &gt; Utilitaires &gt; Scripts, clic droit sur « Utilisateur » &gt; Faire apparaître dans le Finder).</span></li>
+      <li><span>Ouvrez votre fichier MEP et double-cliquez sur le script : cochez l'image témoin de vos blocs photo. Il crée un dossier « … - export MEP » à côté du fichier.</span></li>
+      <li><span>Glissez ce dossier ici (ou « Importer un export MEP »). Chaque page devient une mise en page de ce livre uniquement.</span></li></ol>
+      <div class="row" style="justify-content:center"><button class="btn" data-act="mep-script">Télécharger le script d'export</button><button class="btn primary" data-act="mep-pick">${I_FOLDER} Importer un export MEP</button></div></div>`;
+  const legacy=b.layouts.length?`<details class="legacy" ${b.pl.length?'':'open'}><summary>Anciennes mises en page (captures) · ${b.layouts.length}</summary>${renderLayouts(b,m,ev)}</details>`:'';
+  return calc+actions+(b.pl.length?drop+groups:empty)+legacy;
+}
+// Reads the folder exported by the InDesign script into the current book only
+function shortName(src){return src}
+async function importMep(b,files,force){
+  const list=[...files];const jf=list.find(f=>f.name==='mep.json');
+  if(!jf){toast("Pas de mep.json dans ce dossier : choisissez le dossier « … - export MEP » créé par le script InDesign.");return}
+  let d;try{d=JSON.parse((await jf.text()).replace(/^\uFEFF/,''))}catch(e){toast('mep.json illisible.');return}
+  if(d.app!=='cdf-mep'||!Array.isArray(d.pages)){toast("Ce mep.json ne vient pas du script d'export MEP.");return}
+  const others=[...books.values()].filter(x=>x.id!==b.id&&(x.pl||[]).some(l=>l.src===d.doc));
+  if(others.length&&!force){view.mepPending={book:b.id,files:list};
+    showModal(`<h3>« ${esc(d.doc)} » est déjà importé ailleurs</h3><p class="small muted" style="margin:0">Ce fichier MEP est déjà utilisé par ${others.map(o=>`« ${esc(o.title)} »`).join(', ')}. C'est normal si ce livre a été dupliqué d'un ancien livre ; sinon vous vous êtes peut-être trompé de livre. Les mises en page importées ici restent propres à « ${esc(b.title)} ».</p><div class="row"><button class="btn primary" data-act="mep-force">Importer dans « ${esc(b.title)} »</button><button class="btn" data-act="close-overlay">Annuler</button></div>`);return}
+  const byName=new Map(list.map(f=>[f.name,f]));const src=d.doc;const existing=b.pl.filter(l=>l.src===src);const seen=new Set();let upd=0,add=0;
+  for(const [i,pg] of d.pages.entries()){
+    let l=existing.find(x=>x.pid===pg.pid);if(!l){l={id:uid('pl'),src,pid:pg.pid,name:'p. '+pg.name,locked:false};b.pl.push(l);add++}else upd++;
+    seen.add(l.id);
+    const stories={};for(const f of pg.frames)if(f.k==='tx'&&d.stories&&d.stories[f.st])stories[f.st]=d.stories[f.st];
+    const tol=3/(pg.h||600);const ord=arr=>arr.sort((a,z)=>Math.abs(a.y-z.y)>tol?a.y-z.y:a.x-z.x).forEach((f,j)=>f.o=j);
+    ord(pg.frames.filter(f=>f.k==='ph'));ord(pg.frames.filter(f=>f.k==='tx'));
+    Object.assign(l,{pname:pg.name,side:pg.side,w:pg.w,h:pg.h,frames:pg.frames,stories,ph:d.ph||[],gone:false,order:i});
+    for(const [k,fn,mx] of [['img',pg.img,640],['bg',pg.bg,1100]]){const f=byName.get(fn);if(!f)continue;
+      try{const data=await shrink(f,mx,.74,false);const key=`pl~${b.id}~${l.id}~${k}`;await putCapture(key,data);l[k]='cap:'+key}catch(e){}}
+    setSaved(`Import des mises en page… ${i+1}/${d.pages.length}`);
+  }
+  let gone=0;existing.forEach(l=>{if(!seen.has(l.id)){l.gone=true;gone++}});
+  b.mepSrc=b.mepSrc||{};b.mepSrc[src]={at:Date.now(),n:d.pages.length};
+  save(b);
+  toast(`« ${src} » : ${add} nouvelle${add>1?'s':''} mise${add>1?'s':''} en page${upd?`, ${upd} mise${upd>1?'s':''} à jour`:''}${gone?`, ${gone} absente${gone>1?'s':''} du nouvel export`:''}`);
+}
+function dropEntries(dt){return [...(dt.items||[])].map(i=>i.webkitGetAsEntry&&i.webkitGetAsEntry()).filter(Boolean)}
+async function entriesFiles(ents){const out=[];
+  const walk=async(en,prefix)=>{if(en.isFile){const f=await new Promise((res,rej)=>en.file(res,rej));f._rel=prefix+en.name;out.push(f)}
+    else if(en.isDirectory){const r=en.createReader();let batch;do{batch=await new Promise((res,rej)=>r.readEntries(res,rej));for(const c of batch)await walk(c,prefix+en.name+'/')}while(batch.length)}};
+  for(const en of ents)await walk(en,'');return out}
+
+/* ================= writing: texts poured into the text blocks of the layouts ================= */
+// Stories (chained text blocks) of a planche; each is keyed by the page where it starts
+function spreadStories(b,key){
+  const plm=plById(b);const sides=+key===0?[['r',1]]:[['l',+key],['r',+key+1]];const ids=sides.map(([,p])=>p<=b.pageCount?b.pageLay[p]:null);
+  const map=new Map();
+  sides.forEach(([side,p],k)=>{if(p>b.pageCount)return;const l=plm[ids[k]];if(!l)return;
+    for(const f of l.frames)if(f.k==='tx'){const mk=l.src+'#'+f.st+(ids[0]&&ids[0]===ids[1]?'@'+p:'');if(!map.has(mk))map.set(mk,{sk:l.src+'#'+f.st,frames:[],story:l.stories&&l.stories[f.st]});map.get(mk).frames.push({f,l,page:p,side})}});
+  const out=[...map.values()];for(const s of out){s.frames.sort((a,z)=>a.f.ci-z.f.ci);s.page=s.frames[0].page;s.tkey=s.page+'|'+s.sk}
+  return out.sort((a,z)=>a.page-z.page||a.frames[0].f.o-z.frames[0].f.o);
+}
+function pageStories(b,p){return spreadStories(b,spreadKeyOf(p)).filter(s=>s.page===p)}
+const plainOf=p=>(p.runs||[]).map(r=>r.t).join('');
+const hasText=rec=>!!(rec&&rec.paras&&rec.paras.some(p=>plainOf(p).trim()));
+function textState(rec){if(!hasText(rec))return '';if(rec.st==='checking')return 'draft';if(rec.st!=='done')return 'draft';return rec.q&&rec.q.length?'q':'done'}
+function allStories(b){const out=[];for(const s of spreadsOf(b.pageCount))out.push(...spreadStories(b,s.key));return out}
+function storyContent(b,s){const rec=b.texts[s.tkey];if(hasText(rec))return {paras:rec.paras,user:true};return {paras:((s.story&&s.story.paras)||[]).map(p=>({runs:[{t:p.t||''}]})),user:false}}
+function weightOf(fs){fs=String(fs||'');return /black|heavy|ultra/i.test(fs)?800:/extra ?bold/i.test(fs)?800:/semi|demi/i.test(fs)?600:/bold|gras/i.test(fs)?700:/medium/i.test(fs)?500:/light/i.test(fs)?300:/thin|hair/i.test(fs)?200:400}
+const ALIGN={l:'left',c:'center',r:'right',j:'justify',jc:'justify',jr:'justify',jf:'justify',b:'left',a:'right'};
+const LAST={j:'left',jc:'center',jr:'right',jf:'justify'};
+function paraCss(st,al,W){st=st||{sz:10,ld:12,al:'l'};const a=st.al||'l';
+  let s=`font-family:'${String(st.ff||'').replace(/["'\\<>]/g,'')}',var(--f-body);font-weight:${weightOf(st.fs)};${/italic|oblique/i.test(st.fs||'')?'font-style:italic;':''}font-size:${cq(st.sz||10,W)};line-height:${cq(st.ld||(st.sz||10)*1.2,W)};`;
+  s+=al?`text-align:${al==='r'?'right':'left'};`:`text-align:${ALIGN[a]||'left'};${LAST[a]?`text-align-last:${LAST[a]};`:''}`;
+  const col=cssColor(st.col);if(col)s+=`color:${col};`;
+  if(st.caps==='all')s+='text-transform:uppercase;';else if(st.caps==='small')s+='font-variant-caps:small-caps;';
+  if(st.tr)s+=`letter-spacing:${(st.tr/1000).toFixed(3)}em;`;
+  if(st.sb)s+=`margin-top:${cq(st.sb,W)};`;if(st.sa)s+=`margin-bottom:${cq(st.sa,W)};`;
+  if(st.fi)s+=`text-indent:${cq(st.fi,W)};`;if(st.li)s+=`padding-left:${cq(st.li,W)};`;if(st.ri)s+=`padding-right:${cq(st.ri,W)};`;
+  return s}
+function tokensOf(para){const toks=[];for(const r of para.runs||[]){String(r.t||'').split('\n').forEach((pt,i)=>{if(i>0)toks.push({br:1,b:r.b,c:r.c});(pt.match(/\S+\s*|\s+/g)||[]).forEach(t=>toks.push({t,b:r.b,c:r.c}))})}if(!toks.length)toks.push({t:'\u200b'});return toks}
+function sliceHtml(F,content,styles,W,s,e,tpl){
+  let h='',i=s;
+  while(i<e){const pi=F.flat[i][0],t0=F.flat[i][1];let j=i;while(j<e&&F.flat[j][0]===pi)j++;const t1=F.flat[j-1][1]+1;
+    const st=styles[Math.min(pi,styles.length-1)]||null;const para=content.paras[pi];const toks=F.P[pi].slice(t0,t1);let inner='',k=0;
+    while(k<toks.length){const a=toks[k];let run='',m=k;while(m<toks.length&&!!toks[m].b===!!a.b&&!!toks[m].c===!!a.c){run+=toks[m].br?'<br>':esc(toks[m].t);m++}
+      inner+=(a.b||a.c)?`<span style="${a.b?'font-weight:700;':''}${a.c?'text-transform:uppercase;':''}">${run}</span>`:run;k=m}
+    h+=`<p class="${t0>0?'cont':''}${tpl?' tpl':''}" style="${paraCss(st,para.al,W)}">${inner}</p>`;i=j}
+  return h}
+// Pours a story into its blocks in order (columns included), like InDesign: what does not fit goes to the next block, the rest is overset
+function flowStory(s,content,els){
+  const styles=(s.story&&s.story.paras)||[];const W=s.frames[0].l.w||450;
+  const P=content.paras.map(tokensOf);const flat=[];P.forEach((ts,pi)=>ts.forEach((_,ti)=>flat.push([pi,ti])));const F={P,flat};const total=flat.length;let start=0;
+  els.forEach(el=>el.querySelector('.badge-ovs')?.remove());
+  for(const el of els){const box=el.querySelector('.tfc');if(!box)continue;
+    if(start>=total){box.innerHTML='';continue}
+    const fits=e=>{box.innerHTML=sliceHtml(F,content,styles,W,start,e,!content.user);return box.scrollHeight<=box.clientHeight+1&&box.scrollWidth<=box.clientWidth+1};
+    if(fits(total)){start=total;continue}
+    let lo=start,hi=total;while(hi-lo>1){const mid=(lo+hi)>>1;if(fits(mid))lo=mid;else hi=mid}
+    box.innerHTML=sliceHtml(F,content,styles,W,start,lo,!content.user);start=lo}
+  const ovs=start<total;if(ovs&&els.length)els[els.length-1].insertAdjacentHTML('beforeend','<span class="badge-ovs" title="Texte en excès : il ne tient pas dans le bloc">+</span>');
+  return ovs}
+function flowAll(only){
+  const b=cur();if(!b||view.tab!=='redac')return;
+  for(const s of spreadStories(b,view.rk)){if(only&&s.tkey!==only)continue;
+    const els=[...document.querySelectorAll('.fr.tx[data-tk]')].filter(el=>el.dataset.tk===s.tkey).sort((a,z)=>a.dataset.ci-z.dataset.ci);
+    if(els.length){const o=flowStory(s,storyContent(b,s),els);view.ovs=view.ovs||{};view.ovs[s.tkey]=o;const w=document.getElementById('ovs-warn');if(w&&view.rsel===s.tkey)w.hidden=!o}}
+}
+function rPage(b,key,p,side,l,stories){
+  if(!p)return `<div class="rpage blank ${side}"></div>`;
+  if(!l)return `<div class="rpage nolay ${side}"><span>p. ${p}<br>Pas de mise en page<br><button class="btn sm" data-act="r-plpick" data-page="${p}" style="margin-top:8px">Choisir</button></span></div>`;
+  const W=l.w;const F=pageFill(l,sideEntries(b,key,side));
+  const ph=F.frs.map((f,j)=>{const e=F.map.get(f.id);const it=e&&lib.byPath.get(e.a.p);return `<div class="fr ph ${f.sh==='ov'?'ov':''} ${e?'full':''}" style="${frStyle(f)}" ${it?`data-tid="${it.id}"`:''}>${e?(it&&it.thumb?thumbImg(it):`<span class="nm">${esc(baseName(e.a.p))}</span>`):j+1}</div>`}).join('');
+  const tx=l.frames.filter(f=>f.k==='tx').map(f=>{const s=stories.find(x=>x.frames.some(y=>y.f===f&&y.page===p));if(!s)return '';const head=s.frames[0].f===f&&s.frames[0].page===p;
+    const ins=f.ins||[0,0,0,0];const pad=`padding:${cq(ins[0],W)} ${cq(ins[3],W)} ${cq(ins[2],W)} ${cq(ins[1],W)};`;
+    const cols=(f.cols||1)>1?`column-count:${f.cols};column-gap:${cq(f.gut||12,W)};`:'';const vj=(f.cols||1)===1&&f.vj&&f.vj!=='t'?{c:'safe center',b:'safe flex-end',j:'space-between'}[f.vj]:'';
+    const bg=f.bg?`background:${cssColor(f.bg)};`:'';const sk=f.sk?`box-shadow:inset 0 0 0 ${cq(f.sk.w,W)} ${cssColor(f.sk.c)};`:'';
+    const n=(s.story&&s.story.n)||s.frames.length;const st=textState(b.texts[s.tkey]);
+    return `<div class="fr tx ${view.rsel===s.tkey?'sel':''}" data-act="rsel" data-tk="${esc(s.tkey)}" data-ci="${f.ci||0}" style="${frStyle(f)}${bg}${sk}" title="Clic : rédiger ce texte"><div class="tfi" style="${pad}"><div class="tfc ${vj?'vj':''}" style="${cols}${vj?`justify-content:${vj};`:''}"></div></div>${n>1?`<span class="chain" title="Texte chaîné">${(f.ci||0)+1}/${n}</span>`:''}${head&&st?`<span class="badge-st ${st}" title="${st==='done'?'Terminé et relu':st==='q'?'Relu : questions en attente':'En cours de rédaction'}">${st==='done'?'✓':st==='q'?'?':'✎'}</span>`:''}</div>`}).join('');
+  const bgSrc=imgSrc(l.bg||l.img);
+  return `<div class="rpage ${side}" lang="fr" style="aspect-ratio:${l.w}/${l.h}">${bgSrc?`<img class="plv-bg" src="${esc(bgSrc)}" alt="">`:''}${ph}${tx}</div>`;
+}
+const I_AL_L='<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2 3h12M2 6.3h8M2 9.6h12M2 13h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+const I_AL_R='<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2 3h12M6 6.3h8M2 9.6h12M7 13h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+function edCss(st,al){st=st||{};const a=al||st.al||'l';return `font-family:'${String(st.ff||'').replace(/["'\\<>]/g,'')}',var(--f-body);font-weight:${weightOf(st.fs)};${/italic|oblique/i.test(st.fs||'')?'font-style:italic;':''}font-size:${Math.max(13,Math.min(26,(st.sz||10)*1.4)).toFixed(1)}px;text-align:${al?(al==='r'?'right':'left'):(ALIGN[a]||'left')};${st.caps==='all'?'text-transform:uppercase;':st.caps==='small'?'font-variant-caps:small-caps;':''}`}
+function runsHtml(runs){return (runs||[]).map(r=>{let h=esc(r.t).replace(/\n/g,'<br>');if(r.c)h=`<span class="cap">${h}</span>`;if(r.b)h=`<b>${h}</b>`;return h}).join('')}
+function edHtml(paras,styles){if(!paras.some(p=>plainOf(p)))return paras.length>1?paras.map((p,i)=>`<p data-i="${i}" ${p.al?`data-al="${p.al}"`:''} style="${edCss(styles[Math.min(i,styles.length-1)],p.al)}"><br></p>`).join(''):'';
+  return paras.map((p,i)=>`<p data-i="${i}" ${p.al?`data-al="${p.al}"`:''} style="${edCss(styles[Math.min(i,styles.length-1)],p.al)}">${runsHtml(p.runs)||'<br>'}</p>`).join('')}
+// Editor DOM → paragraphs of runs {t, b, c}; also turns DOM positions (marks) into {p, o} positions
+function parseEd(root,marks){
+  const paras=[];let cur_=null;const pos=(marks||[]).map(()=>null);
+  const newPara=al=>{cur_={runs:[],len:0};if(al)cur_.al=al;paras.push(cur_)};
+  const hit=(node,off)=>{(marks||[]).forEach((m,k)=>{if(pos[k]==null&&m.node===node&&m.off===off){if(!cur_)newPara();pos[k]={p:paras.length-1,o:cur_.len}}})};
+  const push=(t,b,c)=>{if(!t)return;if(!cur_)newPara();const r=cur_.runs[cur_.runs.length-1];if(r&&!!r.b===!!b&&!!r.c===!!c)r.t+=t;else cur_.runs.push(Object.assign({t},b?{b:1}:{},c?{c:1}:{}));cur_.len+=t.length};
+  const text=(n,b,c)=>{const v=n.nodeValue.replace(/\u00a0/g,' ').replace(/\u200b/g,'');(marks||[]).forEach((m,k)=>{if(pos[k]==null&&m.node===n){if(!cur_)newPara();pos[k]={p:paras.length-1,o:cur_.len+Math.min(m.off,v.length)}}});push(v,b,c)};
+  const walk=(n,b,c)=>{const kids=[...n.childNodes];kids.forEach((ch,i)=>{hit(n,i);if(ch.nodeType===3)text(ch,b,c);else if(ch.nodeType===1){if(ch.tagName==='BR'){if(ch.nextSibling)push('\n',b,c)}else walk(ch,b||ch.tagName==='B'||ch.tagName==='STRONG',c||ch.classList.contains('cap'))}});hit(n,kids.length)};
+  const kids=[...root.childNodes];
+  kids.forEach((ch,i)=>{hit(root,i);if(ch.nodeType===1&&/^(P|DIV|H\d|LI|BLOCKQUOTE)$/.test(ch.tagName)){newPara(ch.dataset.al||'');hit(ch,0);walk(ch,false,false);cur_=null}
+    else if(ch.nodeType===3){if(!cur_)newPara();text(ch,false,false)}else if(ch.nodeType===1&&ch.tagName==='BR'){cur_=null}else if(ch.nodeType===1){if(!cur_)newPara();walk(ch,ch.tagName==='B'||ch.tagName==='STRONG',ch.classList.contains('cap'))}});
+  hit(root,kids.length);
+  const out=paras.map(p=>{const o={runs:p.runs.filter(r=>r.t)};if(p.al)o.al=p.al;return o});
+  return {paras:out.length?out:[{runs:[]}],pos};
+}
+function setEdSel(root,a,z){
+  const find=({p,o})=>{const el=root.querySelector(`p[data-i="${p}"]`);if(!el)return [root,root.childNodes.length];let left=o;const tw=document.createTreeWalker(el,NodeFilter.SHOW_TEXT|NodeFilter.SHOW_ELEMENT);let n;
+    while((n=tw.nextNode())){if(n.nodeType===3){if(left<=n.nodeValue.length)return [n,left];left-=n.nodeValue.length}else if(n.tagName==='BR'&&n.nextSibling){if(left===0)return [n.parentNode,[...n.parentNode.childNodes].indexOf(n)];left-=1}}return [el,el.childNodes.length]};
+  try{const [sn,so]=find(a),[en,eo]=find(z);const r=document.createRange();r.setStart(sn,so);r.setEnd(en,eo);const s=getSelection();s.removeAllRanges();s.addRange(r)}catch(e){}
+}
+const charsOf=para=>{const out=[];for(const r of para.runs||[])for(const ch of String(r.t).split(''))out.push({t:ch,b:!!r.b,c:!!r.c});return out};
+const runsOf=chars=>{const runs=[];for(const c of chars){const l=runs[runs.length-1];if(l&&l.b===c.b&&l.c===c.c)l.t+=c.t;else runs.push({t:c.t,b:c.b,c:c.c})}return runs.map(r=>Object.assign({t:r.t},r.b?{b:1}:{},r.c?{c:1}:{}))};
+function toggleAttr(paras,a,z,attr){
+  if(a.p===z.p&&a.o===z.o){const t=plainOf(paras[a.p]||{runs:[]});let s=a.o,e=a.o;while(s>0&&/\S/.test(t[s-1]))s--;while(e<t.length&&/\S/.test(t[e]))e++;a={p:a.p,o:s};z={p:a.p,o:e}}
+  const sel=[];const ch={};for(let p=a.p;p<=z.p;p++){if(!paras[p])continue;ch[p]=charsOf(paras[p]);const s=p===a.p?a.o:0,e=p===z.p?z.o:ch[p].length;for(let i=s;i<e;i++)if(ch[p][i]&&ch[p][i].t!=='\n')sel.push([p,i])}
+  if(!sel.length)return null;const all=sel.every(([p,i])=>ch[p][i][attr]);sel.forEach(([p,i])=>ch[p][i][attr]=!all);
+  for(const p in ch)paras[p].runs=runsOf(ch[p]);return [a,z];
+}
+function replaceRange(para,s,e,txt){const ch=charsOf(para);const at=ch[s]||ch[s-1]||{b:false,c:false};ch.splice(s,e-s,...txt.split('').map(t=>({t,b:at.b,c:at.c})));para.runs=runsOf(ch)}
+function applyFix(paras,fx){const p=paras[fx.p];if(!p||!fx.avant)return false;const i=plainOf(p).indexOf(fx.avant);if(i<0)return false;replaceRange(p,i,i+fx.avant.length,fx.apres??'');return true}
+function redacPanel(b,s,stories){
+  if(!s){const list=stories.map(x=>{const st=textState(b.texts[x.tkey]);const first=(plainOf(storyContent(b,x).paras[0]||{runs:[]})||'Bloc vide').slice(0,60);
+      return `<button data-act="rsel" data-tk="${esc(x.tkey)}"><span class="dot-st ${st}"></span><span class="mono small">p. ${x.page}</span><span>${esc(first)}</span></button>`}).join('');
+    return `<aside class="panel rpanel"><b>Rédaction</b><p class="small muted" style="margin:0">Cliquez sur un bloc texte de la planche pour l'écrire. Le texte prend la mise en forme de la maquette (polices, tailles, colonnes, chaînage) ; vous ne pouvez ajouter que les capitales, le ferré à gauche ou à droite et le gras.</p>${list?`<div class="rlist">${list}</div>`:'<p class="small muted">Aucun bloc texte sur cette planche.</p>'}</aside>`}
+  const rec=b.texts[s.tkey];const styles=(s.story&&s.story.paras)||[];const paras=rec&&rec.paras&&rec.paras.length?rec.paras:[{runs:[]}];
+  const cols=Math.max(1,...s.frames.map(x=>x.f.cols||1));const n=(s.story&&s.story.n)||s.frames.length;
+  const stNames=[];styles.forEach(st=>{const k=`${st.st||'Style'} · ${st.ff||''} ${st.sz||''}/${Math.round((st.ld||0)*10)/10}`;if(!stNames.includes(k))stNames.push(k)});
+  const checking=rec&&rec.st==='checking';const tpl=s.story&&s.story.paras&&s.story.paras.some(p=>(p.t||'').trim());
+  const fx=(rec&&rec.fx)||[],q=(rec&&rec.q)||[];
+  return `<aside class="panel rpanel" id="rpanel">
+    <div class="row" style="justify-content:space-between;gap:6px"><b>Bloc texte · p. ${s.page}</b><button class="btn ghost sm" data-act="r-unsel">Tous les blocs</button></div>
+    <div class="rstyle"><span>${n>1?`chaîné sur ${n} blocs`:'1 bloc'}</span>${cols>1?`<span>${cols} colonnes</span>`:''}${stNames.slice(0,4).map(x=>`<span>${esc(x)}</span>`).join('')}</div>
+    <div class="rtools" role="toolbar" aria-label="Mise en forme">
+      <button data-act="rt" data-cmd="c" title="Capitales">CAP</button>
+      <button data-act="rt" data-cmd="l" title="Ferré à gauche">${I_AL_L}</button>
+      <button data-act="rt" data-cmd="r" title="Ferré à droite">${I_AL_R}</button>
+      <button data-act="rt" data-cmd="b" title="Gras (${IS_MAC?'⌘':'Ctrl+'}B)"><b>G</b></button></div>
+    <div class="red-ed" id="red-ed" contenteditable="${checking?'false':'true'}" spellcheck="true" lang="fr" data-tk="${esc(s.tkey)}" data-ph="Écrivez le texte de ce bloc…">${edHtml(paras,styles)}</div>
+    <p class="small err" id="ovs-warn" ${view.ovs&&view.ovs[s.tkey]?'':'hidden'} style="margin:0">Le texte dépasse des blocs (signe + rouge) : raccourcissez-le.</p>
+    <div class="row"><button class="btn primary" data-act="red-done" data-tk="${esc(s.tkey)}" ${checking?'disabled':''}>${checking?'Relecture en cours…':"J'ai terminé"}</button>${!hasText(rec)&&tpl?`<button class="btn ghost sm" data-act="red-tpl" data-tk="${esc(s.tkey)}" title="Partir du texte présent dans la maquette">Reprendre le texte de la maquette</button>`:''}</div>
+    ${rec&&rec.err?`<p class="small err" style="margin:0">${esc(rec.err)} <button class="linkish" data-act="red-done" data-tk="${esc(s.tkey)}">Relancer</button></p>`:''}
+    ${rec&&rec.st==='done'&&!rec.err&&!fx.length&&!q.length?'<p class="small" style="margin:0;color:var(--ok)">✓ Relu : aucune faute trouvée.</p>':''}
+    ${q.length?`<div class="fixes"><b class="small">Questions de la relecture</b>${q.map((x,i)=>`<div class="fix q"><span><del>${esc(x.avant)}</del> → <ins>${esc(x.apres||'')}</ins></span><span class="why">${esc(x.question||'')}</span><span class="row" style="gap:6px"><button class="btn sm primary" data-act="q-yes" data-tk="${esc(s.tkey)}" data-i="${i}">Corriger</button><button class="btn sm" data-act="q-no" data-tk="${esc(s.tkey)}" data-i="${i}">Garder tel quel</button></span></div>`).join('')}</div>`:''}
+    ${fx.length?`<div class="fixes"><b class="small">Corrigé automatiquement</b>${fx.map((x,i)=>`<div class="fix"><span><del>${esc(x.avant)}</del> → <ins>${esc(x.apres||'')}</ins></span>${x.type||x.raison?`<span class="why">${esc([x.type,x.raison].filter(Boolean).join(' · '))}</span>`:''}<span><button class="btn ghost sm" data-act="fx-undo" data-tk="${esc(s.tkey)}" data-i="${i}">Annuler cette correction</button></span></div>`).join('')}</div>`:''}
+  </aside>`;
+}
+function renderRedac(b,m,ev){
+  if(!b.pl.length)return `<div class="panel emptystate"><h2>Rédaction</h2><p class="muted">Importez d'abord les mises en page de votre fichier MEP (onglet Mises en page) et posez-les sur les pages : vous pourrez ensuite écrire directement dans leurs blocs texte.</p><button class="btn primary" data-act="tab" data-tab="layouts">Aller aux mises en page</button></div>`;
+  const sp=m.sp;const withTx=sp.filter(s=>spreadStories(b,s.key).length);
+  if(view.rk==null||!sp.some(s=>s.key===view.rk))view.rk=(withTx[0]||sp[0]).key;
+  const key=view.rk;const s=sp.find(x=>x.key===key);const stories=spreadStories(b,key);const plm=plById(b);
+  if(view.rsel&&!stories.some(x=>x.tkey===view.rsel))view.rsel=null;
+  const L=s.l?plm[b.pageLay[s.l]]:null,R=s.r?plm[b.pageLay[s.r]]:null;const ref=L||R||b.pl[0];const ratio=(2*ref.w/ref.h).toFixed(4);
+  const all=allStories(b);const done=all.filter(x=>textState(b.texts[x.tkey])==='done').length;
+  const opts=sp.map(x=>{const n=spreadStories(b,x.key).length;return `<option value="${x.key}" ${x.key===key?'selected':''}>${esc(spreadLabel(b,x.key))}${n?` · ${n} texte${n>1?'s':''}`:''}</option>`}).join('');
+  const bar=`<div class="rbar"><button class="btn sm" data-act="rk-step" data-d="-1" aria-label="Planche précédente">‹</button><select class="f sm" id="rk-sel" data-act="rk-sel" aria-label="Planche" style="max-width:340px">${opts}</select><button class="btn sm" data-act="rk-step" data-d="1" aria-label="Planche suivante">›</button>
+    <span class="small muted"><b class="mono">${done}/${all.length}</b> textes terminés</span><span style="flex:1"></span>
+    <button class="btn sm" data-act="r-fs">${view.rfs?'Quitter le plein écran':'Plein écran'}</button></div>`;
+  const stage=`<div class="rstage"><div class="rspread" style="width:min(100cqw,calc(100cqh * ${ratio}));aspect-ratio:${ratio}">${rPage(b,key,s.l,'left',L,stories)}${rPage(b,key,s.r,'right',R,stories)}</div></div>`;
+  const pick=view.plpick!=null&&(view.plpick===s.l||view.plpick===s.r)?`<div style="position:relative">${plPicker(b,view.plpick)}</div>`:'';
+  return `<div class="redac ${view.rfs?'fs':''}" id="redac"><div class="rmain">${bar}${pick}${stage}</div>${redacPanel(b,stories.find(x=>x.tkey===view.rsel)||null,stories)}</div>`;
+}
+const edState={t:null};
+function edRecord(b,tk,paras){let rec=b.texts[tk];if(!rec)rec=b.texts[tk]={paras:[],st:'draft'};rec.paras=paras;if(rec.st!=='draft'&&rec.st!=='checking'){rec.st='draft';rec.fx=[];rec.q=[];rec.err=''}return rec}
+function edCommand(cmd){
+  const b=cur();const el=document.getElementById('red-ed');if(!b||!el)return;const tk=el.dataset.tk;const s=spreadStories(b,view.rk).find(x=>x.tkey===tk);if(!s)return;
+  const sel=getSelection();let marks=[];if(sel.rangeCount){const r=sel.getRangeAt(0);if(el.contains(r.startContainer))marks=[{node:r.startContainer,off:r.startOffset},{node:r.endContainer,off:r.endOffset}]}
+  const {paras,pos}=parseEd(el,marks);let a=pos[0],z=pos[1];
+  if(!a||!z){a={p:paras.length-1,o:plainOf(paras[paras.length-1]).length};z=a}
+  if(cmd==='b'||cmd==='c'){const r=toggleAttr(paras,a,z,cmd);if(!r){toast('Sélectionnez le texte à mettre '+(cmd==='b'?'en gras':'en capitales')+'.');return}[a,z]=r}
+  else{const ps=[];for(let p=a.p;p<=z.p;p++)if(paras[p])ps.push(paras[p]);const all=ps.every(p=>p.al===cmd);ps.forEach(p=>{if(all)delete p.al;else p.al=cmd})}
+  edRecord(b,tk,paras);el.innerHTML=edHtml(paras,(s.story&&s.story.paras)||[]);el.focus();setEdSel(el,a,z);
+  save(b,true);flowAll(tk);
+}
+async function finishText(bid,tk){
+  let b=books.get(bid);let rec=b&&b.texts[tk];
+  const el=document.getElementById('red-ed');if(el&&el.dataset.tk===tk){rec=edRecord(b,tk,parseEd(el).paras)}
+  if(!hasText(rec)){toast("Le bloc est vide : écrivez d'abord le texte.");return}
+  rec.st='checking';rec.err='';rec.q=[];rec.fx=[];save(b);
+  const paras=rec.paras.map(plainOf);let res=null,err='';
+  if(!cloudOn())err="Relecture automatique indisponible : connectez-vous à l'espace en ligne (page Avancement).";
+  else try{const {data,error}=await CLOUD.sb.functions.invoke('relecture',{body:{paras}});if(error)throw error;if(!data||data.error)throw new Error((data&&data.error)||'réponse vide');res=data}
+  catch(e){const st=e&&e.context&&e.context.status;err=st===404?"La relecture n'est pas encore installée dans Supabase (fonction « relecture »).":`Relecture indisponible pour le moment${e&&e.message?' ('+e.message+')':''}.`}
+  b=books.get(bid);rec=b&&b.texts[tk];if(!rec)return;
+  rec.st='done';rec.at=Date.now();
+  if(err)rec.err=err;
+  else{rec.fx=[];for(const c of res.corrections||[])if(applyFix(rec.paras,c))rec.fx.push({p:c.p,avant:c.avant,apres:c.apres,type:c.type||'',raison:c.raison||''});
+    rec.q=(res.questions||[]).filter(x=>rec.paras[x.p]&&plainOf(rec.paras[x.p]).includes(x.avant)).map(x=>({p:x.p,avant:x.avant,apres:x.apres||'',question:x.question||''}))}
+  save(b);
+  if(!err)toast(rec.fx.length||rec.q.length?`Relu : ${rec.fx.length} correction${rec.fx.length>1?'s':''}${rec.q.length?`, ${rec.q.length} question${rec.q.length>1?'s':''}`:''}`:'Relu : aucune faute trouvée');
+}
+window.addEventListener('resize',()=>{clearTimeout(flowAll.t);flowAll.t=setTimeout(()=>flowAll(),150)});
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(()=>flowAll());
+document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&view.rfs){view.rfs=false;render()}else setTimeout(()=>flowAll(),60)});
+document.addEventListener('mousedown',e=>{if(e.target.closest&&e.target.closest('.rtools button'))e.preventDefault()});
+document.addEventListener('input',e=>{const t=e.target;if(!t||t.id!=='red-ed')return;const b=cur();if(!b)return;const tk=t.dataset.tk;
+  edRecord(b,tk,parseEd(t).paras);clearTimeout(edState.t);edState.t=setTimeout(()=>{save(b,true);flowAll(tk)},150)});
+document.addEventListener('paste',e=>{const t=e.target&&e.target.closest&&e.target.closest('#red-ed');if(!t)return;e.preventDefault();e.stopPropagation();
+  const txt=(e.clipboardData&&e.clipboardData.getData('text/plain')||'').replace(/\r\n?/g,'\n');document.execCommand('insertText',false,txt)},true);
+document.addEventListener('keydown',e=>{const t=e.target;if(!t||t.id!=='red-ed')return;const mod=e.metaKey||e.ctrlKey;const k=(e.key||'').toLowerCase();
+  if(mod&&k==='b'){e.preventDefault();edCommand('b')}else if(mod&&(k==='i'||k==='u')){e.preventDefault()}});
+document.addEventListener('focusout',e=>{if(e.target&&e.target.id==='red-ed'){const b=cur();if(b)save(b,true)}});
 
 /* ================= import des événements ================= */
 const XLSX_URL='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
@@ -1134,16 +1493,18 @@ document.addEventListener('click',async ev=>{
   if(view.menu&&!ev.target.closest('.burger:not(.hist)')){view.menu=false;render()}
   if(view.hist&&!ev.target.closest('.hist')&&!ev.target.closest('.histmenu')){view.hist=false;renderHistSlot()}
   if(view.lpick!=null&&!ev.target.closest('.lpick')&&!ev.target.closest('[data-act="lpick"]')){view.lpick=null;render()}
+  if(view.plpick!=null&&!ev.target.closest('.plpick')&&!ev.target.closest('[data-act="plpick"]')&&!ev.target.closest('[data-act="r-plpick"]')){view.plpick=null;render()}
   const t=ev.target.closest('[data-act]');if(!t)return;const act=t.dataset.act;const b=cur();
   if(t.tagName==='INPUT'||t.tagName==='SELECT'||t.tagName==='TEXTAREA')return;
   switch(act){
     case 'show-new':view.showNew=true;view.newErr='';view.newDraft=null;render();setTimeout(()=>document.getElementById('nb-title')?.focus(),0);break;
     case 'hide-new':view.showNew=false;render();break;
     case 'cycle':{const bk=books.get(t.dataset.book);bk.stages[t.dataset.stage]=ST[bk.stages[t.dataset.stage]||'todo'].next;save(bk);break}
-    case 'tab':view.tab=t.dataset.tab;view.sel.clear();render();break;
+    case 'tab':view.tab=t.dataset.tab;view.sel.clear();view.plpick=null;if(view.tab!=='redac'&&view.rfs){view.rfs=false;if(document.fullscreenElement)document.exitFullscreen().catch(()=>{})}render();
+      if(view.tab==='redac'){const r=document.getElementById('redac');if(r)window.scrollTo(0,r.getBoundingClientRect().top+window.scrollY-headerH()-8)}break;
     case 'cdfmode':{const from=view.cdfMode,to=t.dataset.mode;if(from===to)break;
       view.scrollMem=view.scrollMem||{};view.scrollMem[from]={y:window.scrollY,pb:document.getElementById('pb-scroll')?.scrollTop,ps:document.getElementById('ps-scroll')?.scrollTop};
-      view.cdfMode=to;view.sel.clear();view.edit=null;render();
+      view.cdfMode=to;view.sel.clear();view.edit=null;view.plpick=null;render();
       const mem=view.scrollMem[to];
       if(mem){window.scrollTo(0,mem.y);const pb=document.getElementById('pb-scroll'),ps=document.getElementById('ps-scroll');if(pb&&mem.pb!=null)pb.scrollTop=mem.pb;if(ps&&mem.ps!=null)ps.scrollTop=mem.ps}
       else if(to==='photos'){const top=document.querySelector('.cdf-tools');if(top)window.scrollTo(0,top.getBoundingClientRect().top+window.scrollY-headerH())}
@@ -1159,6 +1520,25 @@ document.addEventListener('click',async ev=>{
       b.pages[other]=id;view.edit=null;save(b);break}
     case 'pe-free':{const p=+t.dataset.page;remember(b);delete b.pages[p];dropOrphans(b);view.edit=null;save(b);toastUndo('Page libérée');break}
     case 'lpick':{const k=+t.dataset.key;view.lpick=view.lpick===k?null:k;render();break}
+    case 'plpick':case 'r-plpick':{ev.stopPropagation();const p=+t.dataset.page;view.plpick=view.plpick===p?null:p;render();break}
+    case 'pl-set':{const p=+t.dataset.page,id=t.dataset.pl;if(id){const n=(plUsage(b)[id]||[]).filter(x=>x!==p).length;if(n>=b.maxReuse){toast(`Limite atteinte : cette mise en page est déjà utilisée ${n} fois.`);break}b.pageLay[p]=id}else delete b.pageLay[p];view.plpick=null;save(b);break}
+    case 'pl-lock':{const l=b.pl.find(x=>x.id===t.dataset.pl);if(l){l.locked=!l.locked;save(b)}break}
+    case 'pl-del':{const id=t.dataset.pl;if(view.armed==='pl:'+id){view.armed=null;remember(b);b.pl=b.pl.filter(l=>l.id!==id);for(const k in b.pageLay)if(b.pageLay[k]===id)delete b.pageLay[k];save(b);toastUndo('Mise en page supprimée')}else arm('pl:'+id);break}
+    case 'mep-src-del':{const src=t.dataset.src;if(view.armed==='src:'+src){view.armed=null;remember(b);const ids=new Set(b.pl.filter(l=>l.src===src).map(l=>l.id));b.pl=b.pl.filter(l=>!ids.has(l.id));for(const k in b.pageLay)if(ids.has(b.pageLay[k]))delete b.pageLay[k];if(b.mepSrc)delete b.mepSrc[src];save(b);toastUndo(`« ${src} » retiré du livre`)}else arm('src:'+src);break}
+    case 'mep-pick':{const i=document.getElementById('mepdir');i.value='';i.click();break}
+    case 'mep-script':offerFile(MEP_SCRIPT_NAME,'\uFEFF'+MEP_JSX,MEP_JSX);break;
+    case 'mep-force':{const pnd=view.mepPending;view.mepPending=null;closeOverlay();const bk=pnd&&books.get(pnd.book);if(bk)importMep(bk,pnd.files,true);break}
+    case 'goto-page':{const p=+t.dataset.page;view.tab='cdf';view.cdfMode='plan';view.sel=new Set([p]);render();document.querySelector('.pg.sel')?.scrollIntoView({block:'center',behavior:'smooth'});break}
+    case 'rsel':{view.rsel=t.dataset.tk;view.plpick=null;render();setTimeout(()=>{const el=document.getElementById('red-ed');if(el&&el.isContentEditable){el.focus();const r=document.createRange();r.selectNodeContents(el);r.collapse(false);const sl=getSelection();sl.removeAllRanges();sl.addRange(r)}},0);break}
+    case 'r-unsel':view.rsel=null;render();break;
+    case 'rk-step':{const sp=spreadsOf(b.pageCount);const i=sp.findIndex(x=>x.key===view.rk);const n=sp[Math.max(0,Math.min(sp.length-1,i+(+t.dataset.d)))];if(n){view.rk=n.key;view.rsel=null;view.plpick=null;render()}break}
+    case 'r-fs':{view.rfs=!view.rfs;render();try{if(view.rfs&&document.documentElement.requestFullscreen)document.documentElement.requestFullscreen().catch(()=>{});else if(!view.rfs&&document.fullscreenElement)document.exitFullscreen().catch(()=>{})}catch(e){}break}
+    case 'rt':edCommand(t.dataset.cmd);break;
+    case 'red-done':finishText(b.id,t.dataset.tk);break;
+    case 'red-tpl':{const s_=spreadStories(b,view.rk).find(x=>x.tkey===t.dataset.tk);if(s_&&s_.story){edRecord(b,s_.tkey,s_.story.paras.map(p=>({runs:[{t:p.t||''}]})));save(b)}break}
+    case 'fx-undo':{const rec=b.texts[t.dataset.tk];const i=+t.dataset.i;const f=rec&&rec.fx&&rec.fx[i];if(!f)break;applyFix(rec.paras,{p:f.p,avant:f.apres,apres:f.avant});rec.fx.splice(i,1);save(b);break}
+    case 'q-yes':{const rec=b.texts[t.dataset.tk];const i=+t.dataset.i;const q=rec&&rec.q&&rec.q[i];if(!q)break;if(!applyFix(rec.paras,q))toast("Le passage a changé depuis la relecture.");rec.q.splice(i,1);save(b);break}
+    case 'q-no':{const rec=b.texts[t.dataset.tk];const i=+t.dataset.i;if(rec&&rec.q){rec.q.splice(i,1);save(b)}break}
     case 'lp-set':{const k=t.dataset.key,id=t.dataset.lay;if(id)b.spreads[k]=id;else delete b.spreads[k];view.lpick=null;save(b);break}
     case 'ins-pl':insertPlanche(b,+t.dataset.key);break;
     case 'menu':view.menu=!view.menu;render();break;
@@ -1181,8 +1561,9 @@ document.addEventListener('click',async ev=>{
     case 'goto-pages':{const ep=eventPages(b)[t.dataset.ev]||[];view.tab='cdf';view.cdfMode='plan';view.sel=new Set(ep);render();document.querySelector('.pg.sel')?.scrollIntoView({block:'center',behavior:'smooth'});break}
     case 'goto-spread':{const k=+t.dataset.key;view.tab='cdf';view.cdfMode='plan';view.sel=new Set(spreadPages(b,k));render();document.querySelector(`.spread[data-key="${k}"]`)?.scrollIntoView({block:'center',behavior:'smooth'});break}
     case 'add-lay':{const i=b.layouts.length;b.layouts.push({id:uid('m'),name:'MEP '+(i<26?String.fromCharCode(65+i):i+1),family:'',photos:0,capture:'',locked:false});save(b);break}
-    case 'auto':{const n=autoAssign(b);save(b);toast(n?`${n} double${n>1?'s':''} page${n>1?'s':''} attribuée${n>1?'s':''}`:'Aucune mise en page disponible : toutes ont atteint la limite ou sont verrouillées.');break}
-    case 'redistribute':{if(view.armed!=='redistribute'){arm('redistribute');return}view.armed=null;for(const s of spreadsOf(b.pageCount)){if(b.spreads[s.key]&&!isFixed(b,s.key))delete b.spreads[s.key]}const n=autoAssign(b);save(b);toast(`${n} doubles pages redistribuées (verrouillées conservées)`);break}
+    case 'auto':if(usesPL(b)){const n=autoAssignPL(b);save(b);toast(n?`${n} page${n>1?'s':''} attribuée${n>1?'s':''}`:'Aucune mise en page disponible : toutes ont atteint la limite ou sont verrouillées.');break}{const n=autoAssign(b);save(b);toast(n?`${n} double${n>1?'s':''} page${n>1?'s':''} attribuée${n>1?'s':''}`:'Aucune mise en page disponible : toutes ont atteint la limite ou sont verrouillées.');break}
+    case 'redistribute':{if(view.armed!=='redistribute'){arm('redistribute');return}view.armed=null;
+      if(usesPL(b)){const plm=plById(b);for(let p=1;p<=b.pageCount;p++){const l=plm[b.pageLay[p]];if(b.pageLay[p]&&!b.pins[spreadKeyOf(p)]&&!(l&&l.locked))delete b.pageLay[p]}const n=autoAssignPL(b);save(b);toast(`${n} pages redistribuées (verrouillées conservées)`);break}for(const s of spreadsOf(b.pageCount)){if(b.spreads[s.key]&&!isFixed(b,s.key))delete b.spreads[s.key]}const n=autoAssign(b);save(b);toast(`${n} doubles pages redistribuées (verrouillées conservées)`);break}
     case 'copy-lays':{const src=books.get(document.getElementById('copy-from').value);if(!src){toast('Choisissez un livre source.');return}
       for(const l of src.layouts){const nl={...clone(l),id:uid('m')};for(const side of ['left','right','capture']){const ref=l[side];if(ref&&ref.startsWith('cap:')&&captures[ref.slice(4)]){const key=b.id+'~'+nl.id+'~'+side;await putCapture(key,captures[ref.slice(4)]);nl[side]='cap:'+key}}b.layouts.push(nl)}
       save(b);toast(`${src.layouts.length} mises en page copiées`);break}
@@ -1229,9 +1610,9 @@ document.addEventListener('click',async ev=>{
       else extendEvent(b,id,q);break}
     case 'unassign':{ev.stopPropagation();const k=t.dataset.key;b.assign[k].splice(+t.dataset.idx,1);if(!b.assign[k].length)delete b.assign[k];save(b);break}
     case 'export-csv':{const csv=buildCsv(b);offerFile(`${b.title} - photos par double page.csv`,csv,csv);break}
-    case 'export-indd':{const jsx=buildJsx(b);const readme=['Placement des photos dans InDesign','','1. Décompressez ce dossier.','2. Ouvrez le document InDesign du livre.','3. Fenêtre > Utilitaires > Scripts. Clic droit sur « Utilisateur » > Faire apparaître dans le Finder (ou l\'Explorateur).','4. Copiez placer_photos.jsx dans ce dossier, puis double-cliquez dessus dans le panneau Scripts.','','Le script cherche les photos à partir du dossier du document InDesign (le même que celui choisi dans l\'Atelier : « '+(b.photoRoot||'')+' »).','S\'il ne les trouve pas, il vous demande de sélectionner ce dossier.','Les photos vont dans les blocs image vides de chaque double page, dans l\'ordre de la liste (de haut en bas, puis de gauche à droite, page de gauche d\'abord).','Tout le placement s\'annule en une seule fois avec Édition > Annuler.',''].join('\r\n');
-      const zip=makeZip([{name:'placer_photos.jsx',data:jsx},{name:'assignations.csv',data:buildCsv(b)},{name:'LISEZMOI.txt',data:'﻿'+readme}]);
-      offerFile(`${b.title} - InDesign.zip`,zip,jsx,'placer_photos.jsx');break}
+    case 'export-indd':{const jsx=buildJsx(b);const readme=['Placement des photos et des textes dans InDesign','','1. Décompressez ce dossier.','2. Ouvrez le document InDesign du livre.','3. Fenêtre > Utilitaires > Scripts. Clic droit sur « Utilisateur » > Faire apparaître dans le Finder (ou l\'Explorateur).','4. Copiez placer_photos_textes.jsx dans ce dossier, puis double-cliquez dessus dans le panneau Scripts.','','Le script cherche les photos à partir du dossier du document InDesign (le même que celui choisi dans l\'Atelier : « '+(b.photoRoot||'')+' »).','S\'il ne les trouve pas, il vous demande de sélectionner ce dossier.','Les photos vont dans les blocs image vides (ou contenant encore l\'image témoin de la MEP) : chacune dans le bloc choisi dans l\'application, sinon de haut en bas puis de gauche à droite.','Les textes rédigés se versent dans les blocs texte de chaque page (même ordre de lecture), en gardant la mise en forme de la maquette.','Chaque placement s\'annule en une seule fois avec Édition > Annuler.',''].join('\r\n');
+      const zip=makeZip([{name:'placer_photos_textes.jsx',data:jsx},{name:'assignations.csv',data:buildCsv(b)},{name:'LISEZMOI.txt',data:'﻿'+readme}]);
+      offerFile(`${b.title} - InDesign.zip`,zip,jsx,'placer_photos_textes.jsx');break}
     case 'lb-prev':openLightbox(lightbox.i-1);break;
     case 'lb-next':openLightbox(lightbox.i+1);break;
     case 'lb-add':{const i=lightbox.i;assignPhotos(b,view.active,[t.dataset.path]);save(b);toast('Ajoutée à '+spreadLabel(b,view.active));openLightbox(i+1);break}
@@ -1258,6 +1639,7 @@ document.getElementById('laydir').addEventListener('change',e=>{if(e.target.file
 document.getElementById('photodir').addEventListener('change',async e=>{const files=e.target.files;if(!files.length)return;const pf=view.pendingFolder||{book:view.id,mode:'add'};view.pendingFolder=null;
   const b=books.get(pf.book);if(!b)return;const first=(files[0].webkitRelativePath||files[0].name).split('/');const name=first.length>1?first[0]:'Photos';
   const id=registerFolder(b,name,pf.mode,pf.fid);ensureLibFor(b);await loadFolderFiles(b,id,files)});
+document.getElementById('mepdir').addEventListener('change',e=>{const b=cur();if(b&&e.target.files.length)importMep(b,e.target.files)});
 document.getElementById('impfile').addEventListener('change',e=>{if(e.target.files[0])importFile(e.target.files[0])});
 document.addEventListener('change',e=>{const t=e.target;
   if(t.id==='imp-sheet'){imp.sheet=+t.value;imp.result=imp.grids[imp.sheet];imp.error=imp.result?'':"Pas de chemin de fer reconnu sur cette feuille.";renderImpPreview()}
@@ -1270,8 +1652,11 @@ document.addEventListener('input',e=>{const t=e.target;
 let impT=null;document.addEventListener('input',e=>{if(e.target.id==='imp-paste'){clearTimeout(impT);const v=e.target.value;impT=setTimeout(()=>{imp.src='';importText(v)},250)}});
 document.addEventListener('keydown',e=>{
   const mod=e.metaKey||e.ctrlKey;const k=(e.key||'').toLowerCase();
-  if(mod&&(k==='z'||k==='y')){const a=document.activeElement;if(a&&(/TEXTAREA/.test(a.tagName)||(a.tagName==='INPUT'&&!/checkbox|radio|range/.test(a.type))))return;
+  if(mod&&(k==='z'||k==='y')){const a=document.activeElement;if(a&&(/TEXTAREA/.test(a.tagName)||a.isContentEditable||(a.tagName==='INPUT'&&!/checkbox|radio|range/.test(a.type))))return;
     e.preventDefault();if(k==='y'||(k==='z'&&e.shiftKey))histRedo();else histUndo();renderHistSlot();return}
+  {const a=document.activeElement;const typing=a&&(/INPUT|TEXTAREA|SELECT/.test(a.tagName)||a.isContentEditable);
+    if(!typing&&!lightbox&&view.route==='livre'&&view.tab==='redac'&&(e.key==='ArrowRight'||e.key==='ArrowLeft')){const b=cur();const sp=spreadsOf(b.pageCount);const i=sp.findIndex(x=>x.key===view.rk);const n=sp[i+(e.key==='ArrowRight'?1:-1)];if(n){view.rk=n.key;view.rsel=null;render()}return}
+    if(e.key==='Escape'&&view.rfs&&!typing){view.rfs=false;render();return}}
   if(lightbox&&e.key==='ArrowRight'){openLightbox(lightbox.i+1);return}
   if(lightbox&&e.key==='ArrowLeft'){openLightbox(lightbox.i-1);return}
   if(e.key==='Escape'){if(document.getElementById('overlay').innerHTML){closeOverlay();return}if(view.sel.size){view.sel.clear();render()}else if(lib.sel.size){lib.sel.clear();render()}}
@@ -1287,7 +1672,7 @@ document.addEventListener('paste',e=>{
 });
 
 /* ---------- drag and drop ---------- */
-const ACCEPT={spread:['layout','spreadlay'],psr:['photos','assigned'],half:['trayimg','files'],newlay:['trayimg'],pgmove:['evmove'],plmove:['evmove'],evmerge:['evmove'],trash:['evmove','assigned'],pool:['evmove'],evrow:['evmove']};
+const ACCEPT={spread:['layout','spreadlay'],psr:['photos','assigned'],half:['trayimg','files'],newlay:['trayimg'],pgmove:['evmove','playout'],plmove:['evmove'],evmerge:['evmove'],trash:['evmove','assigned','pagelay'],pool:['evmove'],evrow:['evmove'],pgl:['playout','pagelay'],blk:['photos','assigned'],mepdir:['files']};
 document.addEventListener('dragstart',e=>{
   const s=e.target.closest&&e.target.closest('[data-drag]');if(!s)return;const k=s.dataset.drag;
   if(k==='layout')drag={k,id:s.dataset.lay};
@@ -1295,9 +1680,11 @@ document.addEventListener('dragstart',e=>{
   else if(k==='evmove')drag={k,ev:s.dataset.ev};
   else if(k==='assigned')drag={k,key:s.dataset.key,idx:+s.dataset.idx};
   else if(k==='trayimg')drag={k,item:tray.items.find(x=>x.id===s.dataset.tid)};
+  else if(k==='playout')drag={k,id:s.dataset.pl};
+  else if(k==='pagelay')drag={k,page:+s.dataset.page};
   if(k==='photo'){const p=s.dataset.path;let paths=[p];if(lib.sel.has(p)){const {arr}=visibleItems();paths=arr.filter(x=>lib.sel.has(x.path)).map(x=>x.path)}drag={k:'photos',paths}}
   try{e.dataTransfer.setData('text/plain',k);e.dataTransfer.effectAllowed='copyMove'}catch(_){}
-  if(drag&&(drag.k==='evmove'||drag.k==='assigned'))document.body.classList.add('dragging-del');
+  if(drag&&(drag.k==='evmove'||drag.k==='assigned'||drag.k==='pagelay'))document.body.classList.add('dragging-del');
   if(drag&&(drag.k==='photos'||drag.k==='assigned'))document.body.classList.add('dragging-ph');
 });
 function dropTarget(e){const kind=drag?drag.k:(e.dataTransfer&&[...e.dataTransfer.types].includes('Files')?'files':null);if(!kind)return null;
@@ -1312,6 +1699,25 @@ document.addEventListener('drop',async e=>{
   const z=dropTarget(e);if(!z){document.body.classList.remove('dragging-del');if(e.target.closest&&e.target.closest('main'))e.preventDefault();return}
   e.preventDefault();z.classList.remove('over');document.body.classList.remove('dragging-del','dragging-ph');const b=cur();const d=drag;drag=null;if(!b)return;
   const type=z.dataset.drop;
+  if(type==='mepdir'){const ents=dropEntries(e.dataTransfer);const fl=[...(e.dataTransfer.files||[])];(ents.length?entriesFiles(ents):Promise.resolve(fl)).then(f=>importMep(b,f)).catch(()=>toast("Le dossier n'a pas pu être lu."));return}
+  if(type==='pgl'||(type==='pgmove'&&d&&d.k==='playout')){let T=+z.dataset.page;
+    if(z.classList.contains('wide')){const r=z.getBoundingClientRect();if(e.clientX>r.left+r.width/2)T=T+1}
+    if(d.k==='playout'){const n=(plUsage(b)[d.id]||[]).filter(p=>p!==T).length;if(n>=b.maxReuse){toast(`Limite atteinte : cette mise en page est déjà utilisée ${n} fois.`);return}b.pageLay[T]=d.id;save(b)}
+    else if(d.k==='pagelay'&&d.page!==T){const a=b.pageLay[d.page],c=b.pageLay[T];if(c)b.pageLay[d.page]=c;else delete b.pageLay[d.page];b.pageLay[T]=a;save(b);toast('Mises en page échangées')}
+    return}
+  if(type==='blk'){const key=z.dataset.key,side=z.dataset.side,fid=z.dataset.f;const l=plById(b)[b.pageLay[pageOfSide(key,side)]];if(!l)return;
+    const occ=pageFill(l,sideEntries(b,key,side)).map.get(fid);
+    if(d.k==='photos'){const first=d.paths[0];
+      placeItems(b,key,d.paths.map(p=>{const it=lib.byPath.get(p);return {p,d:it&&it.dateSrc==='exif'?it.date:0}}),side,null);
+      b.assign[key].forEach(a=>{if(a.f===fid&&a.p!==first)delete a.f});const it=b.assign[key].find(a=>a.p===first);if(it)it.f=fid;
+      lib.sel.clear();view.active=+key;view.activeSide=side;save(b)}
+    else if(d.k==='assigned'){const src=b.assign[d.key];const item=src&&src[d.idx];if(!item)return;
+      const sSide=photoSide(d.key,item);const sl=plById(b)[b.pageLay[pageOfSide(d.key,sSide)]];let srcFid=null;
+      if(sl){for(const [f,en] of pageFill(sl,sideEntries(b,d.key,sSide)).map)if(en.a===item)srcFid=f}
+      if(occ&&occ.a!==item){if(String(d.key)===String(key)&&sSide===side&&srcFid)occ.a.f=srcFid;else delete occ.a.f}
+      if(String(d.key)!==String(key)||sSide!==side){src.splice(src.indexOf(item),1);if(!src.length)delete b.assign[d.key];item.s=side;const A=b.assign[key]=b.assign[key]||[];A.push(item);b.assign[key]=[...A.filter(a=>photoSide(key,a)==='l'),...A.filter(a=>photoSide(key,a)==='r')]}
+      b.assign[key].forEach(a=>{if(a!==item&&a.f===fid)delete a.f});item.f=fid;save(b)}
+    return}
   if(type==='spread'){const key=+z.dataset.key;const u=usage(b);
     if(d.k==='layout'){const n=(u[d.id]||[]).filter(k=>k!==key).length;if(n>=b.maxReuse){toast(`Limite atteinte : cette mise en page est déjà utilisée ${n} fois.`);return}b.spreads[key]=d.id;save(b)}
     else if(d.k==='spreadlay'&&d.key!==key){if(b.pins[key]||b.pins[d.key]){toast('Une des deux doubles pages est verrouillée.');return}const a=b.spreads[d.key],c=b.spreads[key];if(c)b.spreads[d.key]=c;else delete b.spreads[d.key];b.spreads[key]=a;save(b);toast('Mises en page échangées')}
@@ -1326,7 +1732,8 @@ document.addEventListener('drop',async e=>{
   else if(type==='pgmove'){const T=+z.dataset.page;const there=b.pages[T];if(there===d.ev)return;if(there)mergeEvents(b,d.ev,there);else moveNow(b,d.ev,'page',T)}
   else if(type==='trash'){document.body.classList.remove('dragging-del');
     if(d.k==='evmove'){remember(b);for(const k in b.pages)if(b.pages[k]===d.ev)delete b.pages[k];save(b);toastUndo("Événement désassigné : il reste dans l'onglet Événements")}
-    else if(d.k==='assigned'){const a=b.assign[d.key];if(a){a.splice(d.idx,1);if(!a.length)delete b.assign[d.key];save(b)}}}
+    else if(d.k==='assigned'){const a=b.assign[d.key];if(a){a.splice(d.idx,1);if(!a.length)delete b.assign[d.key];save(b)}}
+    else if(d.k==='pagelay'){if(b.pageLay[d.page]){delete b.pageLay[d.page];save(b);toast('Mise en page retirée de la page '+d.page)}}}
   else if(type==='evmerge'){if(z.dataset.ev!==d.ev)mergeEvents(b,d.ev,z.dataset.ev)}
   else if(type==='plmove'){moveNow(b,d.ev,'planche',+z.dataset.pl)}
   else if(type==='evrow'){const tid=z.dataset.ev;const r=z.getBoundingClientRect();const before=e.clientY<r.top+r.height*0.35;z.classList.remove('ins-before','merge');if(tid===d.ev)return;
@@ -1352,6 +1759,9 @@ document.addEventListener('change',e=>{
     case 'highlight':view.highlight=v;render();break;
     case 'ev-name':{const x=b.events.find(e=>e.id===t.dataset.ev);if(v.trim()&&x){x.name=v.replace(/\s+$/,'');save(b,t.classList.contains('evname'))}break}
     case 'ev-photos':{const x=b.events.find(e=>e.id===t.dataset.ev);x.photos=Math.max(0,parseInt(v)||0);save(b);break}
+    case 'pl-name':{const x=b.pl.find(l=>l.id===t.dataset.pl);if(x&&v.trim()){x.name=v.trim();save(b)}break}
+    case 'pl-lines':view.plLines=t.checked;render();break;
+    case 'rk-sel':view.rk=+v;view.rsel=null;view.plpick=null;render();break;
     case 'lay-name':{const x=b.layouts.find(l=>l.id===t.dataset.lay);if(v.trim()){x.name=v.trim();save(b)}break}
     case 'lay-fam':{const x=b.layouts.find(l=>l.id===t.dataset.lay);x.family=v;save(b);break}
     case 'lay-photos':{const x=b.layouts.find(l=>l.id===t.dataset.lay);x.photos=Math.max(0,parseInt(v)||0);save(b);break}
@@ -1397,7 +1807,7 @@ document.addEventListener('submit',e=>{
     keys.forEach(k=>{if(id)b.spreads[k]=id;else delete b.spreads[k]});view.sel.clear();save(b);toast(`${keys.length} double${keys.length>1?'s':''} page${keys.length>1?'s':''} mise${keys.length>1?'s':''} à jour`);return}
 });
 
-window.__atelier={idb:IDB,planMove,extendEvent,makeZip,buildJsx,buildCsv,readExif,loadFolderFiles,loadTray,lib,tray,books};
+window.__atelier={idb:IDB,importMep,planMove,extendEvent,makeZip,buildJsx,buildCsv,readExif,loadFolderFiles,loadTray,lib,tray,books};
 document.getElementById('restorepick').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;
   try{const d=JSON.parse(await f.text());if(!Array.isArray(d.books))throw 0;
     for(const bk of d.books){const nb=normBook(bk);const old=books.get(nb.id);if(old)record(old,strip(nb));else record(nb,strip(nb));books.set(nb.id,nb);baseline(nb);
