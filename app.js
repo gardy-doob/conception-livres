@@ -580,7 +580,12 @@ function queueThumb(it){if(it.thumb||it.thumbQueued)return;it.thumbQueued=true;t
 function pumpThumbs(){while(thumbActive<3&&thumbQueue.length){const it=thumbQueue.shift();thumbActive++;makeThumb(it).finally(()=>{thumbActive--;pumpThumbs()})}}
 async function makeThumb(it){
   try{
-    if(it.thumbBlob){it.thumb=URL.createObjectURL(it.thumbBlob);it.thumbRot=it.orient}
+    if(it.thumbBlob){
+      if([3,6,8].includes(it.orient)){const bmp=await createImageBitmap(it.thumbBlob);const q=it.orient!==3;const c=document.createElement('canvas');c.width=q?bmp.height:bmp.width;c.height=q?bmp.width:bmp.height;const x=c.getContext('2d');
+        x.translate(c.width/2,c.height/2);x.rotate(it.orient===6?Math.PI/2:it.orient===8?-Math.PI/2:Math.PI);x.drawImage(bmp,-bmp.width/2,-bmp.height/2);if(bmp.close)bmp.close();
+        const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',.85));it.thumb=URL.createObjectURL(blob)}
+      else it.thumb=URL.createObjectURL(it.thumbBlob);
+      it.thumbRot=1}
     else if(BROWSER_IMG.test(it.name)){const bmp=await createImageBitmap(it.file);const s=Math.min(1,320/Math.max(bmp.width,bmp.height));const c=document.createElement('canvas');c.width=Math.round(bmp.width*s);c.height=Math.round(bmp.height*s);c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);if(bmp.close)bmp.close();
       const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',.8));it.thumb=URL.createObjectURL(blob);it.thumbRot=1}
     else return;
@@ -588,6 +593,14 @@ async function makeThumb(it){
   }catch(e){}
 }
 const ROT={3:'rotate(180deg)',6:'rotate(90deg)',8:'rotate(-90deg)'};
+// Photos shown in a layout block get a larger preview made from the file (orientation applied), so they fill the block sharply
+let bigQueue=[],bigActive=0;
+function queueBig(it){if(it.big||it.bigTried||!BROWSER_IMG.test(it.name))return;it.bigTried=true;bigQueue.push(it);pumpBig()}
+function pumpBig(){while(bigActive<2&&bigQueue.length){const it=bigQueue.shift();bigActive++;makeBig(it).finally(()=>{bigActive--;pumpBig()})}}
+async function makeBig(it){try{const bmp=await createImageBitmap(it.file);const sc=Math.min(1,900/Math.max(bmp.width,bmp.height));const c=document.createElement('canvas');c.width=Math.round(bmp.width*sc);c.height=Math.round(bmp.height*sc);c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);if(bmp.close)bmp.close();
+  const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',.85));it.big=URL.createObjectURL(blob);
+  document.querySelectorAll(`.fr[data-tid="${it.id}"]`).forEach(el=>{el.querySelector('.nm')?.remove();const im=el.querySelector('img');if(im)im.src=it.big;else el.insertAdjacentHTML('afterbegin',`<img src="${it.big}" alt="">`)})}catch(e){}}
+const blockImg=it=>it.big?`<img src="${it.big}" alt="">`:thumbImg(it);
 const thumbImg=it=>it.thumb?`<img src="${it.thumb}" alt="" style="${ROT[it.thumbRot]?'transform:'+ROT[it.thumbRot]:''}">`:'';
 function visibleItems(){
   const b=books.get(view.id);const used=usedPaths(b);
@@ -625,17 +638,17 @@ function renderNav(b){
 }
 const headerH=()=>(document.querySelector('.top')?.offsetHeight||52);
 const UI_KEY='atelier-ui';
-function saveUI(){const u={hash:location.hash,tab:view.tab,cdfMode:view.cdfMode,active:view.active,rk:view.rk,plLines:!!view.plLines,lib:{sort:lib.sort,size:lib.size,sub:lib.sub,hideUsed:lib.hideUsed}};const j=JSON.stringify(u);try{sessionStorage.setItem(UI_KEY,j)}catch(e){}try{localStorage.setItem(UI_KEY,j)}catch(e){}}
+function saveUI(){const u={hash:location.hash,tab:view.tab,cdfMode:view.cdfMode,active:view.active,rk:view.rk,pzh:view.pzh,plLines:!!view.plLines,lib:{sort:lib.sort,size:lib.size,sub:lib.sub,hideUsed:lib.hideUsed}};const j=JSON.stringify(u);try{sessionStorage.setItem(UI_KEY,j)}catch(e){}try{localStorage.setItem(UI_KEY,j)}catch(e){}}
 function loadUI(){let u=null;try{u=JSON.parse(sessionStorage.getItem(UI_KEY)||'null')}catch(e){}if(!u)try{u=JSON.parse(localStorage.getItem(UI_KEY)||'null')}catch(e){}
   if(!u)return;if(u.tab)view.tab=u.tab;if(u.cdfMode)view.cdfMode=u.cdfMode;if(u.lib)Object.assign(lib,{sort:u.lib.sort||lib.sort,size:u.lib.size||lib.size,sub:u.lib.sub!==false,hideUsed:!!u.lib.hideUsed});
-  if(u.rk!=null)view.rk=u.rk;view.plLines=!!u.plLines;
+  if(u.rk!=null)view.rk=u.rk;if(u.pzh)view.pzh=u.pzh;view.plLines=!!u.plLines;
   if(!location.hash&&u.hash&&u.hash.startsWith('#livre-'))history.replaceState(null,'',u.hash);view._active=u.active}
 const loadingState=()=>`<div class="panel emptystate"><p class="muted">Chargement de vos livres…</p></div>`;
 function observeTiles(){
   if(observer)observer.disconnect();const root=document.getElementById('pb-scroll');if(!root)return;
   observer=new IntersectionObserver(ents=>{for(const e of ents)if(e.isIntersecting){const it=lib.items[+e.target.dataset.idx];if(it)queueThumb(it);observer.unobserve(e.target)}},{root,rootMargin:'300px'});
   root.querySelectorAll('.tile[data-idx]').forEach(t=>{const it=lib.items[+t.dataset.idx];if(it&&!it.thumb)observer.observe(t)});
-  document.querySelectorAll('.athumb[data-tid],.fr[data-tid]').forEach(t=>{const it=lib.items.find(x=>x.id===t.dataset.tid);if(it&&!it.thumb)queueThumb(it)});
+  document.querySelectorAll('.athumb[data-tid],.fr[data-tid]').forEach(t=>{const it=lib.items.find(x=>x.id===t.dataset.tid);if(it&&!it.thumb)queueThumb(it);if(it&&t.classList.contains('fr'))queueBig(it)});
 }
 
 function stChip(bookId,k){const s=books.get(bookId).stages[k]||'todo';return `<button class="stchip st-${s}" data-act="cycle" data-book="${esc(bookId)}" data-stage="${k}" title="Cliquer pour passer à « ${ST[ST[s].next].label} »">${ST[s].label}</button>`}
@@ -877,15 +890,16 @@ function renderPhotos(b,m,ev){
           inner=`<div class="pz-mep">${plBlocks(lp,F,s.key,side)}</div>${F.extra.length?`<div class="pz-extra"><span class="pz-l">À placer (${F.extra.length}) :</span>${F.extra.map(({a,i})=>athumbHtml(s.key,a,i)).join('')}${freeB?`<button class="pz-btn" data-act="fill-blocks" data-key="${s.key}" data-side="${side}" title="Pose ces photos dans les blocs vides de cette page, dans l'ordre">Remplir les ${Math.min(freeB,F.extra.length)} bloc${Math.min(freeB,F.extra.length)>1?'s':''} vide${Math.min(freeB,F.extra.length)>1?'s':''}</button>`:''}</div>`:''}`}
         else inner=list.map(({a,i},j)=>athumbHtml(s.key,a,i,j)).join('');
         return `<div class="pz ${view.active===s.key&&defaultSide(s.key)===side?'act':''}" data-drop="psr" data-key="${s.key}" data-side="${side}" data-act="activate-side" title="Page ${side==='l'?'gauche':'droite'} ${pg||''} : glissez des photos ici${lp?' ou directement dans un bloc':''}">
-          <span class="pz-l">${side==='l'?'Gauche':'Droite'} · p. ${pg||'–'}${lp?` · ${F.map.size}/${plPhotos(lp)} bloc${plPhotos(lp)>1?'s':''}`:list.length?` · ${list.length} ph.`:''}${lp&&F.map.size?`<button class="pz-btn" data-act="empty-blocks" data-key="${s.key}" data-side="${side}" title="Sortir les photos des blocs (elles restent sur la page, à placer)" style="margin-left:4px">Vider</button>`:''}${PL&&pg?`<button class="pz-btn" data-act="plpick" data-page="${pg}" title="Changer la mise en page de la page ${pg}">${lp?esc(lp.name):'+ MEP'}</button>`:''}</span>${pg&&ev[b.pages[pg]]?`<span class="pz-t">${esc(ev[b.pages[pg]].name)}</span>`:''}
+          <span class="pz-l">${side==='l'?'Gauche':'Droite'} · p. ${pg||'–'}${lp?` · ${F.map.size}/${plPhotos(lp)} bloc${plPhotos(lp)>1?'s':''}`:list.length?` · ${list.length} ph.`:''}${lp&&F.map.size?`<button class="pz-btn" data-act="empty-blocks" data-key="${s.key}" data-side="${side}" title="Sortir les photos des blocs (elles restent sur la page, à placer)" style="margin-left:4px">Vider</button>`:''}${PL&&pg?`<button class="pz-lay ${lp?'':'none'}" data-act="plpick" data-page="${pg}" title="Choisir la mise en page de la page ${pg} (une page seule ou la planche entière)">${lp?'MEP '+esc(lp.name):'Choisir la MEP'} <span class="cv">▼</span></button>`:''}</span>${pg&&ev[b.pages[pg]]?`<span class="pz-t">${esc(ev[b.pages[pg]].name)}</span>`:''}
           ${inner}${PL&&pg&&view.plpick===pg?plPicker(b,pg):''}</div>`}).join('')}</div>
     </section>`}).join('');
   const right=`<div class="panel pane">
     <div class="pane-bar compact"><div class="strip">
       <select class="f sm" id="ps-ev" data-act="ps-ev" aria-label="Filtrer par événement" style="max-width:200px"><option value="">Toutes les planches</option>${evOpts}</select>
       <span class="mono small muted">${m.placed} ph.</span><span style="flex:1"></span>
+      ${PL?`<label class="small muted row" style="gap:4px;flex-wrap:nowrap" title="Hauteur des pages">Hauteur <input type="range" class="pzh-in" id="pzh" data-act="pzh" min="160" max="700" step="10" value="${view.pzh||320}"></label>`:''}
 </div></div>
-    <div class="pane-scroll" id="ps-scroll">${rows}</div></div>`;
+    <div class="pane-scroll" id="ps-scroll" style="--pzh:${view.pzh||320}px">${rows}</div></div>`;
   return top+`<div class="split" id="split">${left}${right}</div>`;
 }
 
@@ -1020,8 +1034,8 @@ const pageOfSide=(key,side)=>+key===0?1:(side==='l'?+key:+key+1);
 function athumbHtml(key,a,i,j){const it=lib.byPath.get(a.p);return `<div class="athumb ${it?'':'missing'}" draggable="true" data-drag="assigned" data-key="${key}" data-idx="${i}" ${it?`data-tid="${it.id}"`:''} title="${esc(a.p)}">${it&&it.thumb?thumbImg(it):`<span class="nm">${esc(baseName(a.p))}</span>`}${j!=null?`<span class="ord">${j+1}</span>`:''}<button class="x" data-act="unassign" data-key="${key}" data-idx="${i}" aria-label="Retirer">×</button></div>`}
 function plBlocks(l,F,key,side){
   const src=imgSrc(l.img);
-  return `<div class="plv" style="aspect-ratio:${l.w}/${l.h}">${src?`<img class="plv-bg" src="${esc(src)}" alt="">`:''}${F.frs.map((f,j)=>{const e=F.map.get(f.id);const it=e&&lib.byPath.get(e.a.p);
-    return `<div class="fr ph ${f.sh==='ov'?'ov':''} ${e?'full':''}" data-drop="blk" data-key="${key}" data-side="${side}" data-f="${esc(f.id)}" style="${frStyle(f)}" ${e?`draggable="true" data-drag="assigned" data-key="${key}" data-idx="${e.i}" ${it?`data-tid="${it.id}"`:''} title="${esc(e.a.p)} · glisser dans un autre bloc pour échanger"`:`title="Bloc ${j+1} : déposez une photo"`}>${e?(it&&it.thumb?thumbImg(it):`<span class="nm">${esc(baseName(e.a.p))}</span>`)+`<button class="x" data-act="unassign" data-key="${key}" data-idx="${e.i}" aria-label="Retirer">×</button>`:j+1}</div>`}).join('')}</div>`;
+  return `<div class="plv" style="aspect-ratio:${l.w}/${l.h};--hw:${(l.h/l.w).toFixed(4)}">${src?`<img class="plv-bg" src="${esc(src)}" alt="">`:''}${F.frs.map((f,j)=>{const e=F.map.get(f.id);const it=e&&lib.byPath.get(e.a.p);
+    return `<div class="fr ph ${f.sh==='ov'?'ov':''} ${e?'full':''}" data-drop="blk" data-key="${key}" data-side="${side}" data-f="${esc(f.id)}" style="${frStyle(f)}" ${e?`draggable="true" data-drag="assigned" data-key="${key}" data-idx="${e.i}" ${it?`data-tid="${it.id}"`:''} title="${esc(e.a.p)} · glisser dans un autre bloc pour échanger"`:`title="Bloc ${j+1} : déposez une photo"`}>${e?(it&&(it.big||it.thumb)?blockImg(it):`<span class="nm">${esc(baseName(e.a.p))}</span>`)+`<button class="x" data-act="unassign" data-key="${key}" data-idx="${e.i}" aria-label="Retirer">×</button>`:j+1}</div>`}).join('')}</div>`;
 }
 function plPicker(b,page){
   const u=plUsage(b);const cur_=b.pageLay[page];const side=pageSideOf(page);const key=spreadKeyOf(page);const srcs=[...new Set(b.pl.map(l=>l.src))];
@@ -1199,7 +1213,7 @@ function rPage(b,key,p,side,l,stories){
   if(!p)return `<div class="rpage blank ${side}"></div>`;
   if(!l)return `<div class="rpage nolay ${side}"><span>p. ${p}<br>Pas de mise en page<br><button class="btn sm" data-act="r-plpick" data-page="${p}" style="margin-top:8px">Choisir</button></span></div>`;
   const W=l.w;const F=pageFill(l,sideEntries(b,key,side));
-  const ph=F.frs.map((f,j)=>{const e=F.map.get(f.id);const it=e&&lib.byPath.get(e.a.p);return `<div class="fr ph ${f.sh==='ov'?'ov':''} ${e?'full':''}" style="${frStyle(f)}" ${it?`data-tid="${it.id}"`:''}>${e?(it&&it.thumb?thumbImg(it):`<span class="nm">${esc(baseName(e.a.p))}</span>`):j+1}</div>`}).join('');
+  const ph=F.frs.map((f,j)=>{const e=F.map.get(f.id);const it=e&&lib.byPath.get(e.a.p);return `<div class="fr ph ${f.sh==='ov'?'ov':''} ${e?'full':''}" style="${frStyle(f)}" ${it?`data-tid="${it.id}"`:''}>${e?(it&&(it.big||it.thumb)?blockImg(it):`<span class="nm">${esc(baseName(e.a.p))}</span>`):j+1}</div>`}).join('');
   const tx=l.frames.filter(f=>f.k==='tx').map(f=>{const s=stories.find(x=>x.frames.some(y=>y.f===f&&y.page===p));if(!s)return '';const head=s.frames[0].f===f&&s.frames[0].page===p;
     const ins=f.ins||[0,0,0,0];const pad=`padding:${cq(ins[0],W)} ${cq(ins[3],W)} ${cq(ins[2],W)} ${cq(ins[1],W)};`;
     const cols=(f.cols||1)>1?`column-count:${f.cols};column-gap:${cq(f.gut||12,W)};`:'';const vj=(f.cols||1)===1&&f.vj&&f.vj!=='t'?{c:'safe center',b:'safe flex-end',j:'space-between'}[f.vj]:'';
@@ -1775,7 +1789,7 @@ document.addEventListener('drop',async e=>{
 });
 
 /* ---------- inputs ---------- */
-document.addEventListener('input',e=>{const t=e.target;if(t.id==='lib-size'){lib.size=+t.value;t.closest('.pane').style.setProperty('--tile',lib.size+'px')}});
+document.addEventListener('input',e=>{const t=e.target;if(t.id==='pzh'){view.pzh=+t.value;document.getElementById('ps-scroll')?.style.setProperty('--pzh',view.pzh+'px');return}if(t.id==='lib-size'){lib.size=+t.value;t.closest('.pane').style.setProperty('--tile',lib.size+'px')}});
 document.addEventListener('change',e=>{
   const t=e.target;
   if(t.id==='sel-ev-id'){const isNew=t.value==='__new';document.getElementById('sel-ev-name').hidden=!isNew;document.getElementById('sel-ev-ph').hidden=!isNew;if(isNew)document.getElementById('sel-ev-name').focus();return}
@@ -1803,6 +1817,7 @@ document.addEventListener('change',e=>{
     case 'lib-sort':lib.sort=v;render();break;
     case 'lib-hide':lib.hideUsed=t.checked;render();break;
     case 'lib-size':render();break;
+    case 'pzh':saveUI();break;
     case 'ps-ev':view.psEvent=v;render();break;
     case 'spread-name':{const k=t.dataset.key;if(v.trim())b.spreadNames[k]=v.trim();else delete b.spreadNames[k];save(b);break}
     case 'jal-name':{const j=b.jalons.find(x=>x.id===t.dataset.j);if(j&&v.trim()){j.name=v.trim();save(b)}break}
