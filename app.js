@@ -637,10 +637,12 @@ function renderNav(b){
     ${view.menu?`<div class="menu panel">${years.map(y=>`<div class="menu-y">${y||'Sans année'}</div>${all.filter(x=>(+x.year||0)===y).sort((a,z)=>(a.order??999)-(z.order??999)||a.title.localeCompare(z.title)).map(x=>`<a href="#livre-${esc(x.id)}" ${b&&x.id===b.id?'aria-current="page"':''}>${esc(x.title)}</a>`).join('')}`).join('')}<div class="menu-sep"></div><a href="#avancement">Avancement de tous les livres</a><div class="menu-sep"></div>${cloudConfigured()?(CLOUD.user?`<div class="menu-y">En ligne</div><div class="small muted" style="padding:2px 10px">${esc(CLOUD.user.email||'')}</div><button class="mitem" data-act="cloud-out">Se déconnecter</button>`:`<a href="#avancement">Se connecter à l'espace en ligne</a>`):''}<div class="menu-sep"></div><button class="mitem" data-act="backup">Sauvegarder dans un fichier (.json)</button><button class="mitem" data-act="restore">Restaurer une sauvegarde…</button></div>`:''}</span>`};
 }
 const headerH=()=>(document.querySelector('.top')?.offsetHeight||52);
+// Brings a full-height view (Visuel, Rédaction) right under the sticky section tabs
+function scrollUnderTabs(id){const el=document.getElementById(id);if(!el)return;const t=document.querySelector('.tabs2');window.scrollTo(0,el.getBoundingClientRect().top+window.scrollY-headerH()-(t?t.offsetHeight:0)-6)}
 const UI_KEY='atelier-ui';
 function saveUI(){const u={hash:location.hash,tab:view.tab,cdfMode:view.cdfMode,active:view.active,rk:view.rk,pzh:view.pzh,plLines:!!view.plLines,lib:{sort:lib.sort,size:lib.size,sub:lib.sub,hideUsed:lib.hideUsed}};const j=JSON.stringify(u);try{sessionStorage.setItem(UI_KEY,j)}catch(e){}try{localStorage.setItem(UI_KEY,j)}catch(e){}}
 function loadUI(){let u=null;try{u=JSON.parse(sessionStorage.getItem(UI_KEY)||'null')}catch(e){}if(!u)try{u=JSON.parse(localStorage.getItem(UI_KEY)||'null')}catch(e){}
-  if(!u)return;if(u.tab)view.tab=u.tab;if(u.cdfMode)view.cdfMode=u.cdfMode;if(u.lib)Object.assign(lib,{sort:u.lib.sort||lib.sort,size:u.lib.size||lib.size,sub:u.lib.sub!==false,hideUsed:!!u.lib.hideUsed});
+  if(!u)return;if(u.tab)view.tab=u.tab==='events'?'cdf':u.tab;if(u.cdfMode)view.cdfMode=u.cdfMode;if(u.lib)Object.assign(lib,{sort:u.lib.sort||lib.sort,size:u.lib.size||lib.size,sub:u.lib.sub!==false,hideUsed:!!u.lib.hideUsed});
   if(u.rk!=null)view.rk=u.rk;if(u.pzh)view.pzh=u.pzh;view.plLines=!!u.plLines;
   if(!location.hash&&u.hash&&u.hash.startsWith('#livre-'))history.replaceState(null,'',u.hash);view._active=u.active}
 const loadingState=()=>`<div class="panel emptystate"><p class="muted">Chargement de vos livres…</p></div>`;
@@ -712,14 +714,17 @@ function renderBook(b){
       <button class="btn ghost sm danger ${view.armed==='book'?'armed':''}" data-act="del-book">${view.armed==='book'?'Confirmer la suppression':'Supprimer le livre'}</button></div>`;
   const lo=Math.floor(b.pageCount/4)*4,hi=lo+4;
   const warn=b.pageCount%4?`<div class="warnbar">${b.pageCount} pages n'est pas un multiple de 4.${lo?`<button class="btn sm" data-act="setpages" data-n="${lo}">Passer à ${lo} pages</button>`:''}<button class="btn sm" data-act="setpages" data-n="${hi}">Passer à ${hi} pages</button></div>`:'';
-  const tabs=`<div class="tabs" role="tablist">
-      ${[['cdf','Chemin de fer',m.sp.length+' pl.'],['events','Événements',b.events.length],['layouts','Mises en page',m.nLay],['redac','Rédaction',m.texts||'']].map(([k,l,c])=>`<button role="tab" aria-selected="${view.tab===k}" data-act="tab" data-tab="${k}">${l}<span class="count">${c}</span></button>`).join('')}</div>`;
+  const curTab=view.tab==='cdf'?(view.cdfMode==='photos'?'visuel':'cdf'):view.tab;
+  const tb=(id,tab,mode,label,count)=>`<button role="tab" aria-selected="${curTab===id}" data-act="tab" data-tab="${tab}" ${mode?`data-mode="${mode}"`:''}>${label}${count!==''&&count!=null?`<span class="count">${count}</span>`:''}</button>`;
+  const tabs=`<nav class="tabs2" aria-label="Sections du livre">
+      <div class="tgrp"><span class="tgl">Conception</span><div class="tabs" role="tablist">${tb('layouts','layouts','','Mises en page',m.nLay)}${tb('cdf','cdf','plan','Chemin de fer',m.sp.length+' pl.')}</div></div>
+      <div class="tgrp"><span class="tgl">Création</span><div class="tabs" role="tablist">${tb('visuel','cdf','photos','Visuel',m.placed?m.placed+' ph.':'')}${tb('redac','redac','','Rédaction',m.texts||'')}</div></div></nav>`;
   let body='';
   if(view.tab==='cdf')body=view.cdfMode==='photos'?renderPhotos(b,m,ev):renderCdf(b,m,ev);
-  else if(view.tab==='events')body=renderEvents(b,m);else if(view.tab==='redac')body=renderRedac(b,m,ev);else body=renderPageLayouts(b,m,ev);
+  else if(view.tab==='redac')body=renderRedac(b,m,ev);else body=renderPageLayouts(b,m,ev);
   return head+warn+tabs+body;
 }
-const cdfSwitch=()=>`<div class="seg" role="group" aria-label="Vue du chemin de fer"><button data-act="cdfmode" data-mode="plan" aria-pressed="${view.cdfMode==='plan'}">Plan des pages</button><button data-act="cdfmode" data-mode="photos" aria-pressed="${view.cdfMode==='photos'}">Définition des photos</button></div>`;
+const cdfSwitch=()=>`<div class="seg" role="group" aria-label="Vue du chemin de fer"><button data-act="cdfmode" data-mode="plan" aria-pressed="${view.cdfMode==='plan'}">Plan des pages</button><button data-act="cdfmode" data-mode="photos" aria-pressed="${view.cdfMode==='photos'}">Visuel</button></div>`;
 
 function layOptions(b,u,current){
   const max=b.maxReuse;
@@ -754,9 +759,9 @@ function layPicker(b,m,key){
     ${cur_?`<button class="btn ghost sm" data-act="lp-set" data-key="${key}" data-lay="">Retirer la mise en page</button>`:''}</div>`;
 }
 function renderCdf(b,m,ev){
-  if(!b.pageCount)return cdfSwitch()+`<div class="panel emptystate"><h2>Indiquez le nombre de pages</h2><p class="muted">Saisissez le nombre de pages du livre (multiple de 4) sous le titre pour générer les planches, ou importez directement votre chemin de fer Excel.</p><button class="btn primary" data-act="imp-open">Importer depuis Excel…</button></div>`;
+  if(!b.pageCount)return `<div class="panel emptystate"><h2>Indiquez le nombre de pages</h2><p class="muted">Saisissez le nombre de pages du livre (multiple de 4) sous le titre pour générer les planches, ou importez directement votre chemin de fer Excel.</p><button class="btn primary" data-act="imp-open">Importer depuis Excel…</button></div>`;
   const lay=layById(b);const PL=usesPL(b),plm=plById(b),pu=plUsage(b);const LAYS=PL?b.pl.filter(l=>!l.gone):b.layouts;
-  const tools=`<div class="cdf-tools">${cdfSwitch()}
+  const tools=`<div class="cdf-tools"><button class="btn sm" data-act="imp-open" title="Importer les événements d'un chemin de fer Excel">Importer depuis Excel…</button>
      <span class="small muted">Clic sur une page : écrire son événement. Glisser un événement sur un autre : fusionner. Le « + » entre deux planches en insère une.</span>
      <span style="flex:1"></span>
      <label class="row small muted">Repérer <select class="f" id="hl" data-act="highlight"><option value="">Toutes les MEP</option>${LAYS.map(l=>`<option value="${esc(l.id)}" ${view.highlight===l.id?'selected':''}>${esc(l.name)}</option>`).join('')}<option value="__none" ${view.highlight==='__none'?'selected':''}>Sans mise en page</option></select></label>
@@ -826,11 +831,11 @@ function extendEvent(b,evId,q){
   save(b);toastUndo('Événement en double page'+grew);
 }
 function renderPhotos(b,m,ev){
-  if(!b.pageCount)return cdfSwitch();
+  if(!b.pageCount)return `<div class="panel emptystate"><p class="muted">Indiquez d'abord le nombre de pages du livre sous son titre.</p></div>`;
   ensureLibFor(b);
   const lay=layById(b);const PL=usesPL(b),plm=plById(b);
   if(view.active==null||!m.sp.some(s=>s.key===view.active))view.active=m.sp[0].key;
-  const top=`<div class="cdf-tools" id="photos-top">${cdfSwitch()}</div>`;
+  const top='';
   let left;
   if(!lib.items.length){
     left=`<div class="panel pane"><div class="pane-scroll"><div class="emptystate"><h2>Ouvrez le dossier du livre</h2>
@@ -957,7 +962,7 @@ function renderEvents(b,m){
       <td class="grip-c"><span class="grip" draggable="true" data-drag="evmove" data-ev="${esc(e.id)}" title="Glisser entre deux lignes pour déplacer, sur une ligne pour fusionner">⋮⋮</span></td>
       <td style="min-width:260px"><textarea class="f evname-t" rows="1" id="evn-${esc(e.id)}" data-act="ev-name" data-ev="${esc(e.id)}" aria-label="Texte de l'événement">${esc(e.name)}</textarea></td>
       <td class="small" style="white-space:nowrap">${pages.length?`<button class="linkish mono" data-act="goto-pages" data-ev="${esc(e.id)}">${esc(pageDesc(pages))}</button>`:'<span class="muted">aucune page</span>'}</td>
-      <td class="mono small" title="Photos placées dans Définition des photos">${c&&c.placed?c.placed+' ph.':''}</td>
+      <td class="mono small" title="Photos placées dans Visuel">${c&&c.placed?c.placed+' ph.':''}</td>
       <td><button class="btn ghost danger sm ${view.armed==='ev:'+e.id?'armed':''}" data-act="del-ev" data-ev="${esc(e.id)}">${view.armed==='ev:'+e.id?'Confirmer':'Supprimer'}</button></td></tr>`;
   }
   return `<form class="row" id="add-ev" style="margin-bottom:14px">
@@ -1557,15 +1562,10 @@ document.addEventListener('click',async ev=>{
     case 'show-new':view.showNew=true;view.newErr='';view.newDraft=null;render();setTimeout(()=>document.getElementById('nb-title')?.focus(),0);break;
     case 'hide-new':view.showNew=false;render();break;
     case 'cycle':{const bk=books.get(t.dataset.book);bk.stages[t.dataset.stage]=ST[bk.stages[t.dataset.stage]||'todo'].next;save(bk);break}
-    case 'tab':view.tab=t.dataset.tab;view.sel.clear();view.plpick=null;if(view.tab!=='redac'&&view.rfs){view.rfs=false;if(document.fullscreenElement)document.exitFullscreen().catch(()=>{})}render();
-      if(view.tab==='redac'){const r=document.getElementById('redac');if(r)window.scrollTo(0,r.getBoundingClientRect().top+window.scrollY-headerH()-8)}break;
-    case 'cdfmode':{const from=view.cdfMode,to=t.dataset.mode;if(from===to)break;
-      view.scrollMem=view.scrollMem||{};view.scrollMem[from]={y:window.scrollY,pb:document.getElementById('pb-scroll')?.scrollTop,ps:document.getElementById('ps-scroll')?.scrollTop};
-      view.cdfMode=to;view.sel.clear();view.edit=null;view.plpick=null;render();
-      const mem=view.scrollMem[to];
-      if(mem){window.scrollTo(0,mem.y);const pb=document.getElementById('pb-scroll'),ps=document.getElementById('ps-scroll');if(pb&&mem.pb!=null)pb.scrollTop=mem.pb;if(ps&&mem.ps!=null)ps.scrollTop=mem.ps}
-      else if(to==='photos'){const top=document.querySelector('.cdf-tools');if(top)window.scrollTo(0,top.getBoundingClientRect().top+window.scrollY-headerH())}
-      break}
+    case 'tab':if(t.dataset.tab==='cdf'&&view.tab==='cdf'&&t.dataset.mode&&t.dataset.mode!==view.cdfMode){switchCdf(t.dataset.mode);break}
+      if(t.dataset.mode)view.cdfMode=t.dataset.mode;view.tab=t.dataset.tab;view.sel.clear();view.plpick=null;if(view.tab!=='redac'&&view.rfs){view.rfs=false;if(document.fullscreenElement)document.exitFullscreen().catch(()=>{})}render();
+      if(view.tab==='redac')scrollUnderTabs('redac');else if(view.tab==='cdf'&&view.cdfMode==='photos')scrollUnderTabs('split');break;
+    case 'cdfmode':switchCdf(t.dataset.mode);break;
     case 'setpages':b.pageCount=+t.dataset.n;save(b);break;
     case 'page':{if(t.tagName!=='BUTTON')return;const p=+t.dataset.page;
       if(ev.shiftKey||ev.metaKey||ev.ctrlKey){if(ev.shiftKey&&view.last){const [a,z]=[Math.min(view.last,p),Math.max(view.last,p)];for(let i=a;i<=z;i++)view.sel.add(i)}else{view.sel.has(p)?view.sel.delete(p):view.sel.add(p)}view.last=p;view.edit=null;render();break}
@@ -1684,6 +1684,14 @@ document.addEventListener('click',async ev=>{
   }
 });
 document.addEventListener('dblclick',e=>{const t=e.target.closest('.tile');if(!t)return;const {arr}=visibleItems();openLightbox(arr.findIndex(x=>x.path===t.dataset.path))});
+// Chemin de fer ⇄ Visuel: each view keeps its own scroll position
+function switchCdf(to){const from=view.cdfMode;if(from===to)return;
+      view.scrollMem=view.scrollMem||{};view.scrollMem[from]={y:window.scrollY,pb:document.getElementById('pb-scroll')?.scrollTop,ps:document.getElementById('ps-scroll')?.scrollTop};
+      view.cdfMode=to;view.sel.clear();view.edit=null;view.plpick=null;render();
+      const mem=view.scrollMem[to];
+      if(mem){window.scrollTo(0,mem.y);const pb=document.getElementById('pb-scroll'),ps=document.getElementById('ps-scroll');if(pb&&mem.pb!=null)pb.scrollTop=mem.pb;if(ps&&mem.ps!=null)ps.scrollTop=mem.ps}
+      else if(to==='photos')scrollUnderTabs('split');
+      }
 function commitPageEdit(){
   const ta=document.getElementById('pe-text');const b=cur();if(!ta||!b)return;const p=+ta.dataset.page;const v=ta.value.replace(/\s+$/,'');
   const id=b.pages[p];
@@ -1858,7 +1866,7 @@ document.addEventListener('submit',e=>{
     if(pages<4||pages%4){const lo=Math.max(4,Math.floor(pages/4)*4),hi=Math.max(4,Math.ceil(pages/4)*4);view.newErr=`Le nombre de pages doit être un multiple de 4 : essayez ${lo===hi?lo:lo+' ou '+hi}.`;render();return}
     const id=uid('b');const nb=normBook({id,title,year:+year,pageCount:pages,order:books.size,useTypes:false});
     view.showNew=false;view.newErr='';view.newDraft=null;save(nb);location.hash='#livre-'+id;
-    setTimeout(()=>showModal(`<h3>Dossier des photos de « ${esc(title)} »</h3><p class="muted small" style="margin:0">Choisissez le dossier où se trouvent les photos de ce livre (et le fichier InDesign). Vous pourrez en ajouter d'autres, le changer ou le retirer plus tard dans Définition des photos.</p><div class="row"><button class="btn primary" data-act="folder-add">${I_FOLDER} Choisir le dossier</button><button class="btn ghost" data-act="folder-later">Plus tard</button></div>`),60);return}
+    setTimeout(()=>showModal(`<h3>Dossier des photos de « ${esc(title)} »</h3><p class="muted small" style="margin:0">Choisissez le dossier où se trouvent les photos de ce livre (et le fichier InDesign). Vous pourrez en ajouter d'autres, le changer ou le retirer plus tard dans Visuel.</p><div class="row"><button class="btn primary" data-act="folder-add">${I_FOLDER} Choisir le dossier</button><button class="btn ghost" data-act="folder-later">Plus tard</button></div>`),60);return}
   if(f.id==='add-ev'){const name=document.getElementById('ae-name').value.trim();if(!name)return;b.events.push({id:uid('e'),name,photos:parseInt((document.getElementById('ae-ph')||{}).value)||0,hue:nextHue(b)});save(b);setTimeout(()=>document.getElementById('ae-name')?.focus(),0);return}
   if(f.id==='sel-new'){const name=document.getElementById('sel-new-name').value.trim();if(!name){toast("Écrivez le texte de l'événement.");return}
     const e={id:uid('e'),name,photos:0,hue:nextHue(b)};b.events.push(e);for(const p of view.sel)b.pages[p]=e.id;dropOrphans(b);const n=view.sel.size;view.sel.clear();save(b);toast(`Événement créé sur ${n} page${n>1?'s':''}`);return}
