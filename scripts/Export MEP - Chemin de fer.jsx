@@ -199,7 +199,7 @@
         pageIdx++; pText.text = "Page " + pg.name + " (" + pageIdx + "/" + doc.pages.length + ")"; pBar.value = ++step;
         if (!frs.length) continue;
         var num = String(pg.documentOffset + 1); while (num.length < 3) num = "0" + num;
-        result.pages.push({ pid: String(pg.id), name: String(pg.name), off: pg.documentOffset, side: side, w: r2(B[3] - B[1]), h: r2(B[2] - B[0]), img: "p" + num + ".jpg", bg: "p" + num + "-fond.jpg", frames: frs, _recs: recs[q4] });
+        result.pages.push({ pid: String(pg.id), name: String(pg.name), off: pg.documentOffset, sp: si, side: side, w: r2(B[3] - B[1]), h: r2(B[2] - B[0]), img: "p" + num + ".jpg", bg: "p" + num + "-fond.jpg", frames: frs, _recs: recs[q4] });
       }
     }
 
