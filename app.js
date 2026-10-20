@@ -1412,7 +1412,7 @@ document.addEventListener('focusout',e=>{if(e.target&&e.target.id==='red-ed'){co
    est un enregistrement (table blocks) avec une version et un verrou : le site et InDesign écrivent bloc par bloc,
    jamais le livre entier, et une écriture sur une version périmée ou un bloc verrouillé est refusée. */
 const SID='w'+Math.random().toString(36).slice(2,10);
-const CR={byBook:new Map(),timers:new Map(),lockBid:null,lockTimer:null,lastAct:Date.now()};
+const CR={byBook:new Map(),timers:new Map(),lockBid:null,lockTimer:null,lastAct:Date.now(),pushing:new Set(),again:new Set(),own:new Set()};
 const crOf=b=>b&&CR.byBook.get(b.id);
 const inCreation=b=>{const c=crOf(b);return !!(c&&c.data&&c.data.pages&&c.data.pages.length)};
 const myId=()=>CLOUD.user&&CLOUD.user.id;
@@ -1444,12 +1444,21 @@ function applyCreation(b){
 }
 // After each change on the site: send the blocks that differ from the online version (photos and texts only)
 function crPush(b){if(!inCreation(b)||!cloudOn())return;clearTimeout(CR.timers.get(b.id));CR.timers.set(b.id,setTimeout(()=>crPushNow(b.id),450))}
-async function crSave(b,bid,kind,page,data){
+async function crSave(b,bid,kind,page,data,retried){
   const c=crOf(b);const row=c.rows.get(bid);
   const {data:res,error}=await CLOUD.sb.rpc('block_save',{p_owner:ownerOf(b),p_book:b.id,p_bid:bid,p_kind:kind,p_page:page,p_data:data,p_rev:row?row.rev:0,p_src:'site',p_committed:true,p_sid:SID,p_name:myName()});
-  if(error)throw error;if(res&&res.row)c.rows.set(bid,res.row);return res;
+  if(error)throw error;if(res&&res.row)c.rows.set(bid,res.row);
+  if(res&&res.ok)CR.own.add(bid+':'+res.row.rev);
+  // Refused because of a newer version that this very tab wrote (two saves in a row): not a conflict, save again on top of it
+  if(res&&!res.ok&&res.reason==='rev'&&res.row&&CR.own.has(bid+':'+res.row.rev)&&!retried){return crSave(b,bid,kind,page,data,true)}
+  return res;
 }
 async function crPushNow(id){
+  if(CR.pushing.has(id)){CR.again.add(id);return}   // one push at a time per book: the next one starts when this one is done
+  CR.pushing.add(id);
+  try{await crPushOnce(id)}finally{CR.pushing.delete(id);if(CR.again.delete(id))crPush(books.get(id))}
+}
+async function crPushOnce(id){
   const b=books.get(id);if(!inCreation(b)||!cloudOn())return;const c=crOf(b);const d=c.data;let refused=null;
   try{
     for(const pg of d.pages)for(const f of pg.frames){if(f.k!=='ph')continue;
