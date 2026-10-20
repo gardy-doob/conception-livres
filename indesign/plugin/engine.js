@@ -44,11 +44,15 @@
       this.conflicts = new Map(); this.waiting = new Map(); this.log = [];
       this.t = { poll: 0, scan: 0, beat: 0, pres: 0, saved: 0 };
       this.selBid = null; this.lockBid = null; this.lockAt = 0; this.busy = false; this.since = '';
-      this.textCache = {}; this.lastActivity = 0;
+      this.textCache = {}; this.lastActivity = 0; this.queued = new Set(); this.queuedFull = false;
     }
     say(msg) { this.log.unshift({ t: this.now(), msg }); this.log.length = Math.min(this.log.length, 40); this.onChange(); }
     key() { return this.bind ? 'mb:' + this.bind.owner + ':' + this.bind.book : ''; }
-    loadState() { let s = null; try { s = JSON.parse(this.store.getItem(this.key()) || 'null'); } catch (e) {} this.st = Object.assign({ base: {}, applied: {}, pushed: {} }, s || {}); }
+    loadState() {
+      let s = null; try { s = JSON.parse(this.store.getItem(this.key()) || 'null'); } catch (e) {}
+      if (s && s.v !== 2) s = { pages: s.pages || {} };   // older format: start the comparison again from the online versions
+      this.st = Object.assign({ v: 2, base: {}, applied: {}, pushed: {} }, s || {});
+    }
     saveState() { if (this.bind) try { this.store.setItem(this.key(), JSON.stringify(this.st)); } catch (e) {} }
     lockedByOther(r) { return !!(r && r.lock_until && new Date(r.lock_until).getTime() > this.now() && r.lock_sid !== this.sid); }
 
@@ -76,12 +80,18 @@
       const rows = await this.api.blocks(this.bind.owner, this.bind.book, this.since);
       const changed = [];
       for (const r of rows) { const old = this.rows.get(r.bid); if (r.updated_at > this.since) this.since = r.updated_at; if (!old || old.rev !== r.rev || old.lock_sid !== r.lock_sid || old.lock_until !== r.lock_until) { this.rows.set(r.bid, r); if (!old || old.rev !== r.rev) changed.push(r.bid); } }
+      for (const [bid] of this.waiting) { const r = this.rows.get(bid); if (!this.lockedByOther(r)) { this.waiting.delete(bid); if (!changed.includes(bid)) changed.push(bid); } }
       return changed;
     }
 
     // ---------- the heart: compare doc / site / base for each block ----------
+    // base[bid] = { dh: hash of the document content at the last agreement, rev: online version at that moment }
+    // Who changed is decided by the version number online and by the document's own reading: a text written by the site
+    // and read back by InDesign with tiny differences can never bounce back as a "change made in InDesign".
     async sync(doc, opt) {
-      if (!this.bind || this.busy) return; this.busy = true;
+      if (!this.bind) return;
+      if (this.busy) { if (opt.only) opt.only.forEach(b => this.queued.add(b)); else this.queuedFull = this.queuedFull || !!opt.full || 'scan'; return; }
+      this.busy = true;
       const mod = this.dom.isModified(doc);
       try {
         const blocks = this.dom.readBlocks(doc, { full: !!opt.full, cache: this.textCache, only: opt.only, root: this.book });
@@ -89,17 +99,21 @@
         this.saveState();
       } finally { this.busy = false; }
       this.onChange();
+      if (this.queued.size) { const only = [...this.queued]; this.queued.clear(); await this.sync(doc, { only, noPush: opt.noPush }); }
+      if (this.queuedFull) { const f = this.queuedFull === true; this.queuedFull = false; await this.sync(doc, { full: f }); }
     }
     async syncBlock(doc, blk, mod, opt) {
       const { bid, kind } = blk; const row = this.rows.get(bid); const st = this.st;
-      const h = hash(kind, blk.data); const siteH = row && !row.deleted ? hash(kind, row.data) : null; const b0 = st.base[bid];
-      if (siteH === h) { st.base[bid] = h; this.conflicts.delete(bid); this.waiting.delete(bid); return; }
+      const h = hash(kind, blk.data); const live = row && !row.deleted; const siteH = live ? hash(kind, row.data) : null; const b0 = st.base[bid];
+      if (siteH === h) { st.base[bid] = { dh: h, rev: row.rev }; this.conflicts.delete(bid); this.waiting.delete(bid); return; }
       let action;
-      if (!row || row.deleted) action = 'push';
-      else if (b0 === undefined) action = row.src === 'site' && row.rev > 1 ? 'apply' : 'push';
-      else if (b0 === h) action = 'apply';
-      else if (b0 === siteH) action = 'push';
-      else action = 'conflict';
+      if (!live) action = 'push';
+      else if (!b0) action = row.src === 'site' ? 'apply' : 'push';   // never compared yet: the site wins for what it wrote
+      else {
+        const docChanged = h !== b0.dh, siteChanged = row.rev !== b0.rev;
+        if (!docChanged && !siteChanged) return;
+        action = docChanged && siteChanged ? 'conflict' : docChanged ? 'push' : 'apply';
+      }
       if (action === 'apply') return this.applySite(doc, blk, row);
       if (action === 'conflict') { if (!this.conflicts.has(bid)) this.say('Conflit sur ' + this.label(blk) + ' : modifié ici et ailleurs.'); this.conflicts.set(bid, { blk, row }); return; }
       if (opt.noPush) return;
@@ -115,7 +129,7 @@
         p_src: 'id', p_committed: !mod, p_sid: this.sid, p_name: this.me.name });
       if (res && res.row) this.rows.set(bid, res.row);
       if (res && res.ok) {
-        this.st.base[bid] = h; this.waiting.delete(bid); this.conflicts.delete(bid);
+        this.st.base[bid] = { dh: h, rev: res.row.rev }; this.waiting.delete(bid); this.conflicts.delete(bid);
         if (mod && !(bid in this.st.pushed)) this.st.pushed[bid] = prevBase === undefined ? null : prevBase;
         return;
       }
@@ -128,12 +142,16 @@
       const prevBase = this.st.base[bid];
       try { this.dom.writeBlock(doc, blk, row.data, this.book); }
       catch (e) { this.say('Impossible d\'appliquer ' + this.label(blk) + ' : ' + e.message); return; }
-      this.st.base[bid] = hash(blk.kind, row.data);
+      // Remember the text as InDesign reads it back (not as the site sent it)
+      let dh = hash(blk.kind, row.data);
+      try { const back = this.dom.readBlocks(doc, { only: [bid], cache: this.textCache, root: this.book })[0]; if (back) dh = hash(blk.kind, back.data); } catch (e) {}
+      this.st.base[bid] = { dh, rev: row.rev };
       if (!(bid in this.st.applied)) this.st.applied[bid] = prevBase === undefined ? null : prevBase;
-      if (blk.kind === 'tx') delete this.textCache[bid];
-      this.conflicts.delete(bid);
+      this.conflicts.delete(bid); this.waiting.delete(bid);
       this.say((blk.kind === 'tx' ? 'Texte' : 'Photo') + ' p. ' + (blk.page || '?') + ' mis à jour depuis le site' + (row.by_name ? ' (' + row.by_name + ')' : '') + '.');
     }
+    // Reconciliation in one go: every conflicting block takes the site version (or keeps InDesign's)
+    async resolveAll(how) { for (const bid of [...this.conflicts.keys()]) await this.resolve(bid, how); }
 
     // ---------- going into Création: the document becomes the reference of the book ----------
     async startCreation(doc, book, progress) {
@@ -263,13 +281,14 @@
       const row = this.rows.get(bid);
       if (how === 'site') { this.selBid = null; await this.applySite(doc, c.blk, row); }
       else if (how === 'mine') {
-        const h = hash(c.blk.kind, c.blk.data); this.st.base[bid] = row ? hash(c.blk.kind, row.data) : undefined;
+        const h = hash(c.blk.kind, c.blk.data); this.st.base[bid] = row ? { dh: '', rev: row.rev } : undefined;
         await this.push(c.blk, row, this.dom.isModified(doc), h);
       } else if (how === 'both' && c.blk.kind === 'tx') {
         const merged = { paras: [...((row && row.data && row.data.paras) || []), ...(c.blk.data.paras || [])] };
         this.selBid = null; this.dom.writeBlock(doc, c.blk, merged, this.book);
-        const blk = Object.assign({}, c.blk, { data: merged }); this.st.base[bid] = hash('tx', row.data);
-        await this.push(blk, row, true, hash('tx', merged));
+        const back = this.dom.readBlocks(doc, { only: [bid], cache: this.textCache, root: this.book })[0] || Object.assign({}, c.blk, { data: merged });
+        this.st.base[bid] = { dh: '', rev: row.rev };
+        await this.push(back, row, true, hash('tx', back.data));
       }
       this.conflicts.delete(bid); this.saveState(); this.onChange();
     }

@@ -38,10 +38,12 @@
           <p class="muted">${engine.live ? 'Les modifications partent au fil de l\'eau ; les blocs que vous touchez sont réservés pour vous.' : 'Personne d\'autre n\'est actif : vos modifications partent à l\'enregistrement, celles du site arrivent toutes les 20 secondes.'}</p>
           ${others.length ? others.map(o => `<div class="pres"><span class="dot ${o.active ? '' : 'idle'}"></span>${esc(o.name)} ${o.client === 'site' ? 'sur le site' : 'dans InDesign'}${o.active ? '' : ' (inactif)'}</div>`).join('') : '<p class="muted">Personne d\'autre sur le livre.</p>'}
           <div class="row"><button class="sm" id="now">Synchroniser maintenant</button></div></div>
-        ${engine.waiting.size ? `<div class="box"><b>En attente</b>${[...engine.waiting.entries()].map(([bid, r]) => `<p>${bid.charAt(0) === 's' ? 'Texte' : 'Photo'} p. ${esc(r && r.page || '?')} : en cours sur le site par ${esc(r && r.lock_name || 'quelqu\'un')}.</p>`).join('')}</div>` : ''}
-        ${engine.conflicts.size ? `<div class="box"><b>À réconcilier</b>${[...engine.conflicts.entries()].map(([bid, c]) => `<div class="conf"><div>${c.blk.kind === 'tx' ? 'Texte' : 'Photo'} p. ${esc(c.blk.page || '?')} modifié ici et ${c.row && c.row.src === 'site' ? 'sur le site' : 'ailleurs'}${c.row && c.row.by_name ? ' (' + esc(c.row.by_name) + ')' : ''}</div>
+        ${engine.waiting.size ? `<div class="box"><div class="row"><b>En attente (${engine.waiting.size})</b><span class="muted">blocs en cours sur le site</span><button class="sm" id="tgw">${ui.showWaiting ? 'Masquer' : 'Voir'}</button></div>${!ui.showWaiting ? '' : `<div class="scroll">${[...engine.waiting.entries()].map(([bid, r]) => `<div>${bid.charAt(0) === 's' ? 'Texte' : 'Photo'} p. ${esc(r && r.page || '?')} · ${esc(r && r.lock_name || 'quelqu\'un')}</div>`).join('')}</div>`}</div>` : ''}
+        ${engine.conflicts.size ? `<div class="box"><b>À réconcilier (${engine.conflicts.size})</b>
+          ${engine.conflicts.size > 1 ? `<div class="row" style="margin:6px 0"><button class="sm primary" id="all-site">Tout prendre du site</button><button class="sm" id="all-mine">Tout garder d'InDesign</button></div>` : ''}
+          <div class="scroll">${[...engine.conflicts.entries()].map(([bid, c]) => `<div class="conf"><div>${c.blk.kind === 'tx' ? 'Texte' : 'Photo'} p. ${esc(c.blk.page || '?')} modifié ici et ${c.row && c.row.src === 'site' ? 'sur le site' : 'ailleurs'}${c.row && c.row.by_name ? ' (' + esc(c.row.by_name) + ')' : ''}</div>
             <div class="muted">InDesign :</div><pre>${esc(plain(c.blk.data))}</pre><div class="muted">Site :</div><pre>${esc(plain(c.row && c.row.data))}</pre>
-            <div class="row"><button class="sm" data-res="mine" data-bid="${bid}">Garder InDesign</button><button class="sm" data-res="site" data-bid="${bid}">Prendre le site</button>${c.blk.kind === 'tx' ? `<button class="sm" data-res="both" data-bid="${bid}">Les deux</button>` : ''}</div></div>`).join('')}</div>` : ''}`;
+            <div class="row"><button class="sm" data-res="mine" data-bid="${bid}">Garder InDesign</button><button class="sm" data-res="site" data-bid="${bid}">Prendre le site</button>${c.blk.kind === 'tx' ? `<button class="sm" data-res="both" data-bid="${bid}">Les deux</button>` : ''}</div></div>`).join('')}</div></div>` : ''}`;
     }
     el.innerHTML = `<div class="row muted">${esc(engine.me.email)} <button class="sm" id="out">Se déconnecter</button></div>${body}
       ${engine.log.length ? `<div class="box"><b>Journal</b><div class="log">${engine.log.map(l => `<div><b>${time(l.t)}</b>${esc(l.msg)}</div>`).join('')}</div></div>` : ''}`;
@@ -60,6 +62,9 @@
         await engine.startCreation(doc, b, msg => { ui.progress = msg; render(); });
         ui.progress = ''; render();
       } else if (t.id === 'now') { const doc = dom.activeDoc(); if (doc) { await engine.fetchChanged(); await engine.sync(doc, { full: true }); } }
+      else if (t.id === 'tgw') { ui.showWaiting = !ui.showWaiting; render(); }
+      else if (t.id === 'all-site') await engine.resolveAll('site');
+      else if (t.id === 'all-mine') await engine.resolveAll('mine');
       else if (t.dataset && t.dataset.res) await engine.resolve(t.dataset.bid, t.dataset.res);
     } catch (err) { ui.err = err.message; ui.progress = ''; render(); }
   });
