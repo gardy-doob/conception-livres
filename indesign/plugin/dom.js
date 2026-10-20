@@ -24,6 +24,7 @@
     const docName = d => String(safe(() => d.name, '')).replace(/\.indd$/i, '');
     function readBinding(d) { try { const s = d.extractLabel('mb-book'); return s ? JSON.parse(s) : null; } catch (e) { return null; } }
     function writeBinding(d, b) { d.insertLabel('mb-book', JSON.stringify(b)); }
+    function clearBinding(d) { d.insertLabel('mb-book', ''); }
     function activePage(d) { return safe(() => String(app.activeWindow.activePage.name), ''); }
 
     // ---------- geometry (spread coordinates, points) ----------
@@ -278,7 +279,7 @@
       if (i < u8.length) { const n = (u8[i] << 16) | ((i + 1 < u8.length ? u8[i + 1] : 0) << 8); s += A[n >> 18 & 63] + A[n >> 12 & 63] + (i + 1 < u8.length ? A[n >> 6 & 63] : '=') + '='; }
       return s;
     }
-    return { activeDoc, openDocKeys, docKey, isModified, docName, readBinding, writeBinding, activePage, readBlocks, writeBlock, selectionBid, readStructure, exportPreview, relPath, b64 };
+    return { activeDoc, openDocKeys, docKey, isModified, docName, readBinding, writeBinding, clearBinding, activePage, readBlocks, writeBlock, selectionBid, readStructure, exportPreview, relPath, b64 };
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = { makeDom }; else root.MBDom = { makeDom };
 })(typeof window !== 'undefined' ? window : globalThis);

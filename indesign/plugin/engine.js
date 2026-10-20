@@ -38,7 +38,7 @@
       this.api = opt.api; this.dom = opt.dom; this.store = opt.store; this.now = opt.now || (() => Date.now());
       this.sid = opt.sid || ('i' + Math.random().toString(36).slice(2, 10));
       this.onChange = opt.onChange || (() => {});
-      this.me = null; this.bind = null; this.docKey = ''; this.rows = new Map();
+      this.me = null; this.bind = null; this.pending = null; this.docKey = ''; this.rows = new Map();
       this.st = null;             // persisted state of the bound book: {base, applied, pushed}
       this.wasModified = false; this.live = false; this.others = [];
       this.conflicts = new Map(); this.waiting = new Map(); this.log = [];
@@ -62,6 +62,17 @@
       this.docKey = this.dom.docKey(doc);
       const bind = this.dom.readBinding(doc);
       if (!bind || !this.me) { this.onChange(); return; }
+      // The link is stored inside the document, so a copied file (Finder, « Enregistrer sous ») carries the link of the
+      // original book. A document whose place on disk is not the one recorded at the link is never synchronised
+      // before the person confirms it (or unlinks it).
+      if (bind.path !== this.docKey) {
+        this.pending = { bind, reason: bind.path ? 'copy' : 'old', path: bind.path || '' };
+        this.say(bind.path ? 'Ce document n\'est pas le fichier lié à « ' + (bind.title || bind.book) + ' » : synchronisation suspendue.' : 'Lien à confirmer avec « ' + (bind.title || bind.book) + ' » : synchronisation suspendue.');
+        this.onChange(); return;
+      }
+      await this.attach(doc, bind);
+    }
+    async attach(doc, bind) {
       this.bind = bind; this.loadState(); this.wasModified = this.dom.isModified(doc);
       try {
         this.book = await this.api.bookInfo(bind.owner, bind.book);
@@ -74,7 +85,34 @@
       } catch (e) { this.say('Connexion impossible : ' + e.message); }
       this.onChange();
     }
-    unbindLocal() { this.bind = null; this.st = null; this.rows = new Map(); this.conflicts.clear(); this.waiting.clear(); this.since = ''; this.lockBid = null; this.selBid = null; this.textCache = {}; }
+    // « Oui, c'est le document de ce livre » : the link now records this file; the comparison starts again from scratch
+    // (what the site wrote comes in, what was last sent from InDesign is replaced by this document), structure re-sent
+    async confirmBinding(doc) {
+      const p = this.pending; if (!p || !doc) return;
+      const bind = Object.assign({}, p.bind, { path: this.docKey }); this.pending = null;
+      this.dom.writeBinding(doc, bind);
+      try { this.store.setItem('mb:' + bind.owner + ':' + bind.book, 'null'); } catch (e) {}
+      this.bind = bind; this.loadState(); this.st.pages = {};
+      try {
+        this.book = await this.api.bookInfo(bind.owner, bind.book);
+        await this.fetchAll();
+        await this.publishStructure(doc, { force: true });
+        await this.sync(doc, { full: true });
+        this.wasModified = this.dom.isModified(doc);
+        this.say('Document confirmé pour « ' + (this.book && this.book.title || bind.book) + ' » : pages et blocs renvoyés. Enregistrez le document.');
+      } catch (e) { this.say('Connexion impossible : ' + e.message); }
+      this.onChange();
+    }
+    // « Délier ce document » : the document no longer belongs to any book; nothing is changed online
+    async unlinkDoc(doc) {
+      if (!doc) return;
+      const t = (this.pending && this.pending.bind.title) || (this.bind && (this.book && this.book.title || this.bind.title)) || '';
+      if (this.bind) { await this.unlock(); try { await this.api.leave(this.bind.owner, this.bind.book, this.sid); } catch (e) {} }
+      this.dom.clearBinding(doc); this.unbindLocal(); this.wasModified = this.dom.isModified(doc);
+      this.say('Document délié' + (t ? ' de « ' + t + ' »' : '') + '. Rien n\'a été modifié en ligne.');
+      this.onChange();
+    }
+    unbindLocal() { this.pending = null; this.bind = null; this.st = null; this.rows = new Map(); this.conflicts.clear(); this.waiting.clear(); this.since = ''; this.lockBid = null; this.selBid = null; this.textCache = {}; }
     async fetchAll() { const rows = await this.api.blocks(this.bind.owner, this.bind.book); this.rows = new Map(rows.map(r => [r.bid, r])); this.since = rows.reduce((m, r) => r.updated_at > m ? r.updated_at : m, ''); }
     async fetchChanged() {
       const rows = await this.api.blocks(this.bind.owner, this.bind.book, this.since);
@@ -156,9 +194,10 @@
     // ---------- going into Création: the document becomes the reference of the book ----------
     async startCreation(doc, book, progress) {
       progress = progress || (() => {});
-      this.dom.writeBinding(doc, { owner: book.owner, book: book.id, title: book.title });
+      if (/^sans-titre:/.test(this.dom.docKey(doc))) throw new Error('Enregistrez d\'abord le document (Fichier › Enregistrer), puis recommencez.');
       this.unbindLocal(); this.docKey = this.dom.docKey(doc);
-      this.bind = { owner: book.owner, book: book.id, title: book.title }; this.loadState(); this.st.pages = {};
+      this.bind = { owner: book.owner, book: book.id, title: book.title, path: this.docKey };
+      this.dom.writeBinding(doc, this.bind); this.loadState(); this.st.pages = {};
       this.book = await this.api.bookInfo(book.owner, book.id);
       await this.publishStructure(doc, { force: true, progress });
       await this.fetchAll();

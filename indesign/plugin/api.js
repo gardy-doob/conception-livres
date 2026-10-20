@@ -31,6 +31,7 @@
         const rows = await raw('/rest/v1/books?select=id,user_id,title:data->>title,year:data->>year&order=updated_at.desc');
         return rows.map(r => ({ id: r.id, owner: r.user_id, title: r.title || r.id, year: r.year, shared: session && r.user_id !== session.user.id }));
       },
+      async creations() { try { return await raw('/rest/v1/creations?select=owner,book_id,doc:data->>doc'); } catch (e) { return []; } },
       async bookInfo(owner, id) {
         const rows = await raw('/rest/v1/books?select=title:data->>title,root:data->>photoRoot,folders:data->photoFolders,pl:data->pl&user_id=eq.' + q(owner) + '&id=eq.' + q(id));
         const r = rows[0] || {}; const ph = new Set(); (r.pl || []).forEach(l => (l.ph || []).forEach(x => ph.add(String(x).toLowerCase())));

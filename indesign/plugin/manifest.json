@@ -2,7 +2,7 @@
   "manifestVersion": 5,
   "id": "com.moodbook.indesign.sync",
   "name": "moodbook",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "main": "index.html",
   "host": { "app": "ID", "minVersion": "18.5.0" },
   "entrypoints": [
