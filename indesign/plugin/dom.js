@@ -53,7 +53,10 @@
       if (!FRAMES.includes(cn(it)) || anchored(it) || !onPage(it)) return false;
       if (safe(() => it.extractLabel('mb-decor'), '')) return false;
       const ln = linkOf(it); if (ln) return !DECOR.test(ln);
-      return safe(() => eq(it.contentType, E.ContentType.GRAPHIC_TYPE), false) || safe(() => eq(it.contentType, E.ContentType.UNASSIGNED), false);
+      // Empty frame: a photo block only if it is a graphic frame without a colour fill (coloured shapes are decoration)
+      if (!safe(() => eq(it.contentType, E.ContentType.GRAPHIC_TYPE), false)) return false;
+      const fill = safe(() => it.fillColor, null); const fname = String(safe(() => fill && fill.name, '') || '');
+      return !fill || /^(None|Aucun|Ninguno|Keine|Nessuno|Paper|Papier)$/i.test(fname) || !['Color', 'Tint', 'Gradient'].includes(cn(fill));
     }
     function storyOnlyGraphic(st) { return safe(() => els(st.allGraphics).length > 0 && String(st.contents).replace(/[\s\uFFFC]/g, '') === '', false); }
     function storyPage(st) {
