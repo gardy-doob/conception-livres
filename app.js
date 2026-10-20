@@ -1346,6 +1346,7 @@ function redacPanel(b,s,stories){
     ${rec&&rec.err?`<p class="small err" style="margin:0">${esc(rec.err)} <button class="linkish" data-act="red-done" data-tk="${esc(s.tkey)}">Relancer</button></p>`:''}
     ${rec&&rec.st==='done'&&!rec.err&&!fx.length&&!q.length?'<p class="small" style="margin:0;color:var(--ok)">✓ Relu : aucune faute trouvée.</p>':''}
     ${q.length?`<div class="fixes"><b class="small">Questions de la relecture</b>${q.map((x,i)=>`<div class="fix q"><span><del>${esc(x.avant)}</del> → <ins>${esc(x.apres||'')}</ins></span><span class="why">${esc(x.question||'')}</span><span class="row" style="gap:6px"><button class="btn sm primary" data-act="q-yes" data-tk="${esc(s.tkey)}" data-i="${i}">Corriger</button><button class="btn sm" data-act="q-no" data-tk="${esc(s.tkey)}" data-i="${i}">Garder tel quel</button></span></div>`).join('')}</div>`:''}
+    ${rec&&rec.st==='done'&&!lockedO?`<div class="rnext"><button class="btn primary" data-act="red-next" data-tk="${esc(s.tkey)}" title="Garde le texte tel qu'il est${q.length?' (les questions restantes sont ignorées)':''} et ouvre le texte suivant">${rec.ok?'Texte suivant':'Valider et texte suivant'} →</button><button class="btn" data-act="red-nextpl" title="Ouvre le premier texte de la planche suivante">Planche suivante ⇥</button></div>`:''}
     ${fx.length?`<div class="fixes"><b class="small">Corrigé automatiquement</b>${fx.map((x,i)=>`<div class="fix"><span><del>${esc(x.avant)}</del> → <ins>${esc(x.apres||'')}</ins></span>${x.type||x.raison?`<span class="why">${esc([x.type,x.raison].filter(Boolean).join(' · '))}</span>`:''}<span><button class="btn ghost sm" data-act="fx-undo" data-tk="${esc(s.tkey)}" data-i="${i}">Annuler cette correction</button></span></div>`).join('')}</div>`:''}
   </aside>`;
 }
@@ -1788,6 +1789,14 @@ document.addEventListener('click',async ev=>{
     case 'red-tpl':{const s_=spreadStories(b,view.rk).find(x=>x.tkey===t.dataset.tk);if(s_&&s_.story){edRecord(b,s_.tkey,s_.story.paras.map(p=>({runs:[{t:p.t||''}]})));save(b)}break}
     case 'fx-undo':{const rec=b.texts[t.dataset.tk];const i=+t.dataset.i;const f=rec&&rec.fx&&rec.fx[i];if(!f)break;applyFix(rec.paras,{p:f.p,avant:f.apres,apres:f.avant});rec.fx.splice(i,1);save(b);break}
     case 'q-yes':{const rec=b.texts[t.dataset.tk];const i=+t.dataset.i;const q=rec&&rec.q&&rec.q[i];if(!q)break;if(!applyFix(rec.paras,q))toast("Le passage a changé depuis la relecture.");rec.q.splice(i,1);save(b);break}
+    case 'red-next':case 'red-nextpl':{
+      const tk=t.dataset.tk;if(act==='red-next'&&tk&&b.texts[tk]){const rec=b.texts[tk];rec.q=[];rec.ok=true;rec.st='done';save(b,true)}
+      const all=allStories(b);const curTk=tk||view.rsel;const i=all.findIndex(x=>x.tkey===curTk);let next=null;
+      if(act==='red-next')next=all[i+1]||null;
+      else{const curKey=view.rk;next=all.find(x=>spreadKeyOf(x.page)!==curKey&&(spreadKeyOf(x.page)>curKey))||null}
+      if(!next){toast(act==='red-next'?'C\'était le dernier texte du livre.':'Pas d\'autre planche avec du texte après celle-ci.');render();break}
+      view.rk=spreadKeyOf(next.page);view.rsel=next.tkey;view.plpick=null;render();
+      setTimeout(()=>{const el=document.getElementById('red-ed');if(el&&el.isContentEditable){el.focus();const r=document.createRange();r.selectNodeContents(el);r.collapse(false);const sl=getSelection();sl.removeAllRanges();sl.addRange(r)}},0);break}
     case 'q-no':{const rec=b.texts[t.dataset.tk];const i=+t.dataset.i;if(rec&&rec.q){rec.q.splice(i,1);save(b)}break}
     case 'lp-set':{const k=t.dataset.key,id=t.dataset.lay;if(id)b.spreads[k]=id;else delete b.spreads[k];view.lpick=null;save(b);break}
     case 'ins-pl':insertPlanche(b,+t.dataset.key);break;

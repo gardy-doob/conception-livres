@@ -711,6 +711,7 @@ details.legacy>summary{cursor:pointer;font-weight:600;color:var(--muted);margin-
 .rstyle{font-size:11px;color:var(--muted);display:flex;gap:4px;flex-wrap:wrap}
 .rstyle span{background:var(--sunk);border-radius:3px;padding:0 5px}
 .fixes{display:grid;gap:6px}
+.rnext{display:flex;gap:6px;flex-wrap:wrap;padding:8px;border-radius:8px;background:var(--ok-bg)}
 .fix{border:1px solid var(--line);border-radius:6px;padding:7px 9px;font-size:13px;display:grid;gap:4px}
 .fix.q{border-color:var(--doing);background:var(--doing-bg)}
 .fix del{color:var(--bad);text-decoration:line-through}
