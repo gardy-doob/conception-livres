@@ -526,6 +526,8 @@ body.has-pool .trash{bottom:calc(60px + env(safe-area-inset-bottom,0px))}
 .tabs2 .tabs button:hover{color:var(--ink)}
 .tabs2 .tabs button[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12),inset 0 -2px 0 var(--accent)}
 .tabs2 .tabs .count{margin-left:6px}
+.ver-slot{display:inline-flex;gap:6px;align-items:center}.ver-slot:empty{display:none}
+.vtag{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 8px;white-space:nowrap}
 /* book head */
 .bookhead2{display:flex;gap:16px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;margin-bottom:12px}
 .bh-main{min-width:0;flex:1;display:grid;gap:4px}

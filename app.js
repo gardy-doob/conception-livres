@@ -628,7 +628,7 @@ window.addEventListener('hashchange',()=>{readHash();render();window.scrollTo(0,
 /* ================= render ================= */
 function render(){
   const nav=document.getElementById('nav');const b=view.route==='livre'?books.get(view.id):null;
-  const nv=renderNav(b);nav.innerHTML=nv.links;document.getElementById('burger-slot').innerHTML=nv.burger;renderHistSlot();
+  renderVersion();const nv=renderNav(b);nav.innerHTML=nv.links;document.getElementById('burger-slot').innerHTML=nv.burger;renderHistSlot();
   const app=document.getElementById('app');
   const keep={pb:document.getElementById('pb-scroll')?.scrollTop,ps:document.getElementById('ps-scroll')?.scrollTop,tr:document.getElementById('tray-list')?.scrollTop};
   if(view.route==='livre'){if(b)app.innerHTML=renderBook(normBook(b));else app.innerHTML=loaded?`<div class="panel emptystate"><h2>Livre introuvable</h2><p class="muted">Il a peut-être été supprimé.</p><a class="btn" href="#avancement">Retour à l'avancement</a></div>`:loadingState()}
@@ -1280,7 +1280,7 @@ function rPage(b,key,p,side,l,stories){
     const bg=f.bg?`background:${cssColor(f.bg)};`:'';const sk=f.sk?`box-shadow:inset 0 0 0 ${cq(f.sk.w,W)} ${cssColor(f.sk.c)};`:'';
     const n=(s.story&&s.story.n)||s.frames.length;const st=textState(b.texts[s.tkey]);
     const crr2=b&&inCreation(b)?crOf(b):null;const lr=crr2&&crr2.rows.get('s'+String(s.tkey).split('#')[1]);const lko=lockedByOther(lr);
-    return `<div class="fr tx ${view.rsel===s.tkey?'sel':''} ${lko?'locked':''}" ${lko?`data-lockby="${esc(lockWho(lr))}"`:''} data-act="rsel" data-tk="${esc(s.tkey)}" data-ci="${f.ci||0}" style="${frStyle(f)}${bg}${sk}" title="Clic : rédiger ce texte"><div class="tfi" style="${pad}"><div class="tfc ${vj?'vj':''}" style="${cols}${vj?`justify-content:${vj};`:''}"></div></div>${n>1?`<span class="chain" title="Texte chaîné">${(f.ci||0)+1}/${n}</span>`:''}${head&&st?`<span class="badge-st ${st}" title="${st==='done'?'Terminé et relu':st==='q'?'Relu : questions en attente':'En cours de rédaction'}">${st==='done'?'✓':st==='q'?'?':'✎'}</span>`:''}</div>`}).join('');
+    return `<div class="fr tx ${view.rsel===s.tkey?'sel':''} ${lko?'locked':''}" ${lko?`data-lockby="${esc(lockWho(lr))}"`:''} data-act="rsel" data-tk="${esc(s.tkey)}" data-ci="${f.ci||0}" style="${frStyle(f)}${bg}${sk}" title="Clic : rédiger ce texte"><div class="tfi" style="${pad}"><div class="tfc ${vj?'vj':''}" style="${cols}${vj?`justify-content:${vj};`:''}"></div></div>${n>1?`<span class="chain" title="Texte chaîné">${(f.ci||0)+1}/${n}</span>`:''}${head&&st?`<span class="badge-st ${st}" title="${st==='done'?(b.texts[s.tkey]&&b.texts[s.tkey].at?'Terminé et relu':'Terminé'):st==='q'?'Relu : questions en attente':'En cours de rédaction'}">${st==='done'?'✓':st==='q'?'?':'✎'}</span>`:''}</div>`}).join('');
   const bgSrc=imgSrc(l.bg||l.img);
   return `<div class="rpage ${side}" lang="fr" style="aspect-ratio:${l.w}/${l.h}">${bgSrc?`<img class="plv-bg" src="${esc(bgSrc)}" alt="">`:''}${ph}${tx}</div>`;
 }
@@ -1342,7 +1342,7 @@ function redacPanel(b,s,stories){
       <button data-act="rt" data-cmd="b" title="Gras (${IS_MAC?'⌘':'Ctrl+'}B)"><b>G</b></button></div>
     <div class="red-ed" id="red-ed" contenteditable="${checking?'false':'true'}" spellcheck="true" lang="fr" data-tk="${esc(s.tkey)}" data-ph="Écrivez le texte de ce bloc…">${edHtml(paras,styles)}</div>
     <p class="small err" id="ovs-warn" ${view.ovs&&view.ovs[s.tkey]?'':'hidden'} style="margin:0">Le texte dépasse des blocs (signe + rouge) : raccourcissez-le.</p>
-    <div class="row"><button class="btn primary" data-act="red-done" data-tk="${esc(s.tkey)}" ${checking?'disabled':''}>${lockedO?'Texte en cours ailleurs':checking?'Relecture en cours…':"J'ai terminé"}</button>${!hasText(rec)&&tpl?`<button class="btn ghost sm" data-act="red-tpl" data-tk="${esc(s.tkey)}" title="Partir du texte présent dans la maquette">Reprendre le texte de la maquette</button>`:''}</div>
+    <div class="row"><button class="btn primary" data-act="red-next" data-tk="${esc(s.tkey)}" ${checking?'disabled':''} title="Marque ce texte comme terminé et ouvre le texte suivant">${lockedO?'Texte en cours ailleurs':"J'ai terminé →"}</button><button class="btn" data-act="red-done" data-tk="${esc(s.tkey)}" ${checking?'disabled':''} title="Relecture de l'orthographe, de la conjugaison et de la ponctuation">${checking&&!lockedO?'Relecture en cours…':'Relecture'}</button>${!hasText(rec)&&tpl?`<button class="btn ghost sm" data-act="red-tpl" data-tk="${esc(s.tkey)}" title="Partir du texte présent dans la maquette">Reprendre le texte de la maquette</button>`:''}</div>
     ${rec&&rec.err?`<p class="small err" style="margin:0">${esc(rec.err)} <button class="linkish" data-act="red-done" data-tk="${esc(s.tkey)}">Relancer</button></p>`:''}
     ${rec&&rec.st==='done'&&!rec.err&&!fx.length&&!q.length?'<p class="small" style="margin:0;color:var(--ok)">✓ Relu : aucune faute trouvée.</p>':''}
     ${q.length?`<div class="fixes"><b class="small">Questions de la relecture</b>${q.map((x,i)=>`<div class="fix q"><span><del>${esc(x.avant)}</del> → <ins>${esc(x.apres||'')}</ins></span><span class="why">${esc(x.question||'')}</span><span class="row" style="gap:6px"><button class="btn sm primary" data-act="q-yes" data-tk="${esc(s.tkey)}" data-i="${i}">Corriger</button><button class="btn sm" data-act="q-no" data-tk="${esc(s.tkey)}" data-i="${i}">Garder tel quel</button></span></div>`).join('')}</div>`:''}
@@ -1411,6 +1411,22 @@ document.addEventListener('focusout',e=>{if(e.target&&e.target.id==='red-ed'){co
    La structure (pages, blocs, styles) vient du panneau InDesign (table creations). Chaque bloc photo et chaque texte
    est un enregistrement (table blocks) avec une version et un verrou : le site et InDesign écrivent bloc par bloc,
    jamais le livre entier, et une écriture sur une version périmée ou un bloc verrouillé est refusée. */
+const MB_VERSION='202610200959';
+const IS_ADMIN=()=>((CLOUD.user&&CLOUD.user.email)||'').toLowerCase()==='gardy.eugene@gmail.com';
+function fmtBuild(v){const m=String(v).match(/^(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)/);return m?`${m[3]}/${m[2]} ${m[4]}:${m[5]}`:v}
+function renderVersion(){const el=document.getElementById('ver-slot');if(!el)return;
+  el.innerHTML=IS_ADMIN()?`<span class="vtag mono" title="Version de l'application chargée">v ${esc(fmtBuild(MB_VERSION))}</span><button class="btn ghost sm" data-act="load-latest">Charger la dernière version</button>`:''}
+async function latestVersion(){const r=await fetch('version.json?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw new Error('version');return (await r.json()).v}
+async function loadLatest(){
+  toast('Recherche de la dernière version…');
+  let v;try{v=await latestVersion()}catch(e){toast('Impossible de vérifier la version en ligne pour le moment.');return}
+  if(v===MB_VERSION){toast(`✓ Vous avez déjà la dernière version (v ${fmtBuild(v)}).`);return}
+  try{sessionStorage.setItem('mb-expect',v)}catch(e){}
+  location.replace(location.pathname+'?v='+encodeURIComponent(v)+location.hash);
+}
+// After reloading for a new version: say whether it really is the latest one
+(()=>{let exp=null;try{exp=sessionStorage.getItem('mb-expect');sessionStorage.removeItem('mb-expect')}catch(e){}
+  if(exp)setTimeout(()=>toast(exp===MB_VERSION?`✓ Dernière version chargée (v ${fmtBuild(MB_VERSION)}).`:`La version ${fmtBuild(exp)} n'est pas encore disponible : GitHub la publie, réessayez dans une minute (chargée : v ${fmtBuild(MB_VERSION)}).`),900)})();
 const SID='w'+Math.random().toString(36).slice(2,10);
 const CR={byBook:new Map(),timers:new Map(),lockBid:null,lockTimer:null,lastAct:Date.now(),pushing:new Set(),again:new Set(),own:new Set()};
 const crOf=b=>b&&CR.byBook.get(b.id);
@@ -1795,11 +1811,12 @@ document.addEventListener('click',async ev=>{
     case 'r-fs':{view.rfs=!view.rfs;render();try{if(view.rfs&&document.documentElement.requestFullscreen)document.documentElement.requestFullscreen().catch(()=>{});else if(!view.rfs&&document.fullscreenElement)document.exitFullscreen().catch(()=>{})}catch(e){}break}
     case 'rt':edCommand(t.dataset.cmd);break;
     case 'red-done':finishText(b.id,t.dataset.tk);break;
+    case 'load-latest':loadLatest();break;
     case 'red-tpl':{const s_=spreadStories(b,view.rk).find(x=>x.tkey===t.dataset.tk);if(s_&&s_.story){edRecord(b,s_.tkey,s_.story.paras.map(p=>({runs:[{t:p.t||''}]})));save(b)}break}
     case 'fx-undo':{const rec=b.texts[t.dataset.tk];const i=+t.dataset.i;const f=rec&&rec.fx&&rec.fx[i];if(!f)break;applyFix(rec.paras,{p:f.p,avant:f.apres,apres:f.avant});rec.fx.splice(i,1);save(b);break}
     case 'q-yes':{const rec=b.texts[t.dataset.tk];const i=+t.dataset.i;const q=rec&&rec.q&&rec.q[i];if(!q)break;if(!applyFix(rec.paras,q))toast("Le passage a changé depuis la relecture.");rec.q.splice(i,1);save(b);break}
     case 'red-next':case 'red-nextpl':{
-      const tk=t.dataset.tk;if(act==='red-next'&&tk&&b.texts[tk]){const rec=b.texts[tk];rec.q=[];rec.ok=true;rec.st='done';save(b,true)}
+      const tk=t.dataset.tk;if(act==='red-next'&&tk&&b.texts[tk]&&hasText(b.texts[tk])){const rec=b.texts[tk];rec.q=[];rec.ok=true;rec.st='done';save(b,true)}
       const all=allStories(b);const curTk=tk||view.rsel;const i=all.findIndex(x=>x.tkey===curTk);let next=null;
       if(act==='red-next')next=all[i+1]||null;
       else{const curKey=view.rk;next=all.find(x=>spreadKeyOf(x.page)!==curKey&&(spreadKeyOf(x.page)>curKey))||null}
