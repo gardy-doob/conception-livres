@@ -400,9 +400,9 @@ body.dragging-del .trash{display:flex}
 .pg.right .dbl{right:auto;left:6px}
 .pg.left .dbl svg{transform:scaleX(1)}
 .pg.right .dbl svg{transform:scaleX(-1)}
-#pool .pool{position:fixed;left:0;right:0;bottom:0;z-index:7;background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px);box-shadow:0 -2px 10px rgba(0,0,0,.06)}
+#pool .pool,#rbarslot .pool{position:fixed;left:0;right:0;bottom:0;z-index:7;background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px);box-shadow:0 -2px 10px rgba(0,0,0,.06)}
 #pool .pool.over{background:var(--accent-soft);outline:none}
-#pool .wrap{display:flex;gap:10px;align-items:center;padding-block:5px;min-height:34px}
+#pool .wrap,#rbarslot .wrap{display:flex;gap:10px;align-items:center;padding-block:5px;min-height:34px}
 .pool-t{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600;white-space:nowrap}
 .pool-list{display:flex;gap:5px;overflow-x:auto;flex:1;min-width:0;scrollbar-width:thin}
 .pchip{flex:none;cursor:grab;font-size:12px;padding:2px 8px;border-radius:4px;background:hsl(var(--h) 55% var(--evL));border-left:3px solid hsl(var(--h) 60% var(--evS));color:var(--evText);white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis}
@@ -757,12 +757,21 @@ details.legacy>summary{cursor:pointer;font-weight:600;color:var(--muted);margin-
 .todo.done .td-in{text-decoration:line-through;color:var(--muted)}
 .todo .icon-btn.sm{font-size:11px;padding:3px 6px;width:auto;height:auto;white-space:nowrap}
 .linkish{border:0;background:none;padding:0;color:var(--accent);font:inherit;cursor:pointer;text-decoration:underline}
-.rmain{position:relative}
-.rmain .rstage{padding-bottom:62px}
-.rbar.dock{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);z-index:6;flex-wrap:nowrap;max-width:calc(100% - 24px);background:color-mix(in srgb,var(--surface) 92%,transparent);backdrop-filter:blur(6px);border:1px solid var(--line);border-radius:999px;padding:6px 10px;box-shadow:0 4px 18px rgba(0,0,0,.14);opacity:.22;transition:opacity .18s}
-.rbar.dock:hover,.rbar.dock:focus-within{opacity:1}
-.rbar.dock .f{max-width:260px}
-@media (hover:none){.rbar.dock{opacity:.85}}
+.rstrip .wrap{gap:12px;max-width:none}
+.rstrip{opacity:.4;transition:opacity .18s}.rstrip:hover,.rstrip:focus-within{opacity:1}
+@media (hover:none){.rstrip{opacity:1}}
+.rnav{display:flex;gap:6px;align-items:center;flex:none}.rnav select{max-width:250px}.nowrap{white-space:nowrap}
+.rsep{width:1px;align-self:stretch;background:var(--line);flex:none}
+.nchip{flex:none;display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:2px 8px;border-radius:4px;background:var(--sunk);border-left:3px solid var(--accent);max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:default}
+.nchip.id{border-left-color:var(--cyan)}.nchip input{margin:0;accent-color:var(--accent)}.nchip b{font-weight:600}.nchip i{font-style:normal;font-size:10px;color:var(--cyan);font-weight:600}
+.rnote{display:flex;gap:6px;align-items:center;flex:0 1 560px;min-width:280px}.rnote #rn-text{flex:1;min-width:120px}.rnote #rn-page{width:auto}
+.seg.sm button{padding:3px 8px;font-size:12px}
+body.has-rbar main{padding-bottom:60px}
+body.has-rbar .redac{height:calc(100vh - var(--toph,52px) - 74px - 50px)}
+body.has-rbar .redac.fs{height:auto;bottom:50px}
+body.has-rbar #rbarslot .pool{z-index:30}
+@media (max-width:900px){.rstrip .wrap{flex-wrap:wrap}.rsep{display:none}.rnote{flex-basis:100%;min-width:0}.rnav{flex-basis:100%}.rnav select{flex:1;min-width:0}.rnav .nowrap,.rnav [data-act="r-fs"]{display:none}}
+body.has-rbar .toast{bottom:calc(110px + env(safe-area-inset-bottom,0px))}
 .rspread.single{background:transparent;box-shadow:none}.rspread.single .rpage:not(.blank){box-shadow:0 6px 24px rgba(0,0,0,.18)}
 .fr.tx .tmk{position:absolute;inset:0;overflow:hidden;pointer-events:none}.fr.tx .tmk img{position:absolute;max-width:none;display:block}
 .fr.tx .tfb{position:absolute;inset:0;pointer-events:none}

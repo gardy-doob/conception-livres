@@ -637,7 +637,7 @@ function render(){
   if(view.route==='livre'){if(b)app.innerHTML=renderBook(normBook(b));else app.innerHTML=loaded?`<div class="panel emptystate"><h2>Livre introuvable</h2><p class="muted">Il a peut-être été supprimé.</p><a class="btn" href="#avancement">Retour à l'avancement</a></div>`:loadingState()}
   else app.innerHTML=renderProgress();
   for(const [id,k] of [['pb-scroll','pb'],['ps-scroll','ps'],['tray-list','tr']]){const el=document.getElementById(id);if(el&&keep[k]!=null)el.scrollTop=keep[k]}
-  document.documentElement.style.setProperty('--toph',headerH()+'px');observeTiles();renderSelbar();renderPool();if(loaded)saveUI();maybeReopenDir();
+  document.documentElement.style.setProperty('--toph',headerH()+'px');observeTiles();renderSelbar();renderPool();renderRbar();if(loaded)saveUI();maybeReopenDir();
   if(view.route==='livre'&&view.tab==='redac')flowAll();
   crPresence();{const bb=view.route==='livre'?books.get(view.id):null;const want=bb&&inCreation(bb)&&view.tab==='redac'&&view.rsel?'s'+String(view.rsel).split('#')[1]:null;if(want!==CR.lockBid){if(want)crLock(bb,want);else crUnlock(bb||books.get(CR.lockBook))}CR.lockBook=bb&&bb.id}
   if(view.mepSettings){if(view.route==='livre'&&view.tab==='layouts'&&view._mepSet){const sc=document.querySelector('#overlay .modal')?.scrollTop;showModal(view._mepSet,'wide mepset');const md=document.querySelector('#overlay .modal');if(md&&sc)md.scrollTop=sc}else closeOverlay()}
@@ -1375,12 +1375,9 @@ function renderRedac(b,m,ev){
   const L=s.l?plm[b.pageLay[s.l]]:null,R=s.r?plm[b.pageLay[s.r]]:null;const ref=L||R||b.pl[0];const ratio=(2*ref.w/ref.h).toFixed(4);
   const all=allStories(b);const done=all.filter(x=>textState(b.texts[x.tkey])==='done').length;
   const opts=sp.map(x=>{const n=spreadStories(b,x.key).length;return `<option value="${x.key}" ${x.key===key?'selected':''}>${esc(spreadLabel(b,x.key))}${n?` · ${n} texte${n>1?'s':''}`:''}</option>`}).join('');
-  const bar=`<div class="rbar dock"><button class="btn sm" data-act="rk-step" data-d="-1" aria-label="Planche précédente">‹</button><select class="f sm" id="rk-sel" data-act="rk-sel" aria-label="Planche" style="max-width:340px">${opts}</select><button class="btn sm" data-act="rk-step" data-d="1" aria-label="Planche suivante">›</button>
-    <span class="small muted"><b class="mono">${done}/${all.length}</b> textes terminés</span><span style="flex:1"></span>
-    <button class="btn sm" data-act="r-fs">${view.rfs?'Quitter le plein écran':'Plein écran'}</button></div>`;
   const stage=`<div class="rstage"><div class="rspread ${!s.l||!s.r?'single':''}" style="width:min(100cqw,calc(100cqh * ${ratio}));aspect-ratio:${ratio}">${rPage(b,key,s.l,'left',L,stories)}${rPage(b,key,s.r,'right',R,stories)}</div></div>`;
   const pick=view.plpick!=null&&(view.plpick===s.l||view.plpick===s.r)?`<div style="position:relative">${plPicker(b,view.plpick)}</div>`:'';
-  return `<div class="redac ${view.rfs?'fs':''}" id="redac"><div class="rmain">${pick}${stage}${bar}</div>${redacPanel(b,stories.find(x=>x.tkey===view.rsel)||null,stories)}</div>`;
+  return `<div class="redac ${view.rfs?'fs':''}" id="redac"><div class="rmain">${pick}${stage}</div>${redacPanel(b,stories.find(x=>x.tkey===view.rsel)||null,stories)}</div>`;
 }
 const edState={t:null};
 function edRecord(b,tk,paras){let rec=b.texts[tk];if(!rec)rec=b.texts[tk]={paras:[],st:'draft'};if(!rec.st)rec.st='draft';rec.paras=paras;if(rec.st!=='draft'&&rec.st!=='checking'){rec.st='draft';rec.fx=[];rec.q=[];rec.err=''}return rec}
@@ -1427,7 +1424,7 @@ document.addEventListener('focusout',e=>{if(e.target&&e.target.id==='red-ed'){co
    La structure (pages, blocs, styles) vient du panneau InDesign (table creations). Chaque bloc photo et chaque texte
    est un enregistrement (table blocks) avec une version et un verrou : le site et InDesign écrivent bloc par bloc,
    jamais le livre entier, et une écriture sur une version périmée ou un bloc verrouillé est refusée. */
-const MB_VERSION='202610231509';
+const MB_VERSION='202610231528';
 const IS_ADMIN=()=>((CLOUD.user&&CLOUD.user.email)||'').toLowerCase()==='gardy.eugene@gmail.com';
 function fmtBuild(v){const m=String(v).match(/^(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)/);return m?`${m[3]}/${m[2]} ${m[4]}:${m[5]}`:v}
 function renderVersion(){const el=document.getElementById('ver-slot');if(!el)return;
@@ -1590,7 +1587,7 @@ async function pjLoad(){
   setTimeout(pjMaybeShowFix,600);
 }
 function pjPutTodo(r){const k=r.owner+'|'+r.book_id;const a=(PJ.todos.get(k)||[]).filter(x=>x.id!==r.id);a.push(r);a.sort((x,z)=>String(x.created_at).localeCompare(String(z.created_at)));PJ.todos.set(k,a)}
-const pjEditing=()=>{const a=document.activeElement;return !!(a&&(a.id==='td-text'||a.id==='td-page'||(a.dataset&&a.dataset.tdedit)))};
+const pjEditing=()=>{const a=document.activeElement;return !!(a&&(a.id==='td-text'||a.id==='td-page'||a.id==='rn-text'||(a.dataset&&a.dataset.tdedit)))};
 function pjRefresh(){if(view.files)renderFiles();if(!pjEditing())softRender()}
 function pjOnDoc(pl){if(pl.eventType==='DELETE'){const o=pl.old;if(o&&o.owner)PJ.docs.delete(pjKey(o.owner,o.book_id,o.role))}else{const r=pl.new;if(r&&r.owner)PJ.docs.set(pjKey(r.owner,r.book_id,r.role),r)}pjRefresh()}
 function pjOnTodo(pl){if(pl.eventType==='DELETE'){const o=pl.old;if(!o||!o.owner)return;const k=o.owner+'|'+o.book_id;PJ.todos.set(k,(PJ.todos.get(k)||[]).filter(x=>x.id!==o.id))}else if(pl.new&&pl.new.owner)pjPutTodo(pl.new);pjRefresh()}
@@ -1645,6 +1642,31 @@ async function pjPatch(b,role,patch){const r=pjDoc(b,role);if(!r)return;Object.a
   const {error}=await CLOUD.sb.from('project_docs').update(patch).eq('owner',r.owner).eq('book_id',r.book_id).eq('role',role);if(error)toast('Envoi impossible : '+error.message)}
 function pjOpen(b,role,mode){return pjPatch(b,role,{open_req:new Date().toISOString(),open_mode:mode,open_for:String(CLOUD.user.email||'').toLowerCase(),open_err:null})}
 // Notes / à faire
+// Rédaction: bottom strip (like « Sans page ») with the planche navigation and the notes of the pages shown
+function renderRbar(){
+  const el=document.getElementById('rbarslot');if(!el)return;const b=view.route==='livre'?books.get(view.id):null;
+  const on=!!(b&&view.tab==='redac'&&b.pl&&b.pl.length&&view.rk!=null);document.body.classList.toggle('has-rbar',on);
+  if(!on){el.innerHTML='';return}
+  const keepFocus=document.activeElement&&document.activeElement.id==='rn-text';
+  const sp=spreadsOf(b.pageCount);const s=sp.find(x=>x.key===view.rk);if(!s){el.innerHTML='';return}
+  const all=allStories(b);const done=all.filter(x=>textState(b.texts[x.tkey])==='done').length;
+  const opts=sp.map(x=>{const n=spreadStories(b,x.key).length;return `<option value="${x.key}" ${x.key===view.rk?'selected':''}>${esc(spreadLabel(b,x.key))}${n?` · ${n} texte${n>1?'s':''}`:''}</option>`}).join('');
+  const pages=[s.l,s.r].filter(p=>p&&p<=b.pageCount);
+  const selStory=view.rsel?spreadStories(b,view.rk).find(x=>x.tkey===view.rsel):null;
+  const pg=view.rnPage&&pages.includes(view.rnPage)?view.rnPage:(selStory?selStory.page:pages[0]);
+  const notes=cloudOn()&&PJ.ok===true?pjTodos(b).filter(t=>!t.done&&pages.includes(t.page)):[];const tg=view.tdTarget||'site';
+  const notesHtml=cloudOn()&&PJ.ok===true?`<span class="pool-t">Notes <b class="mono">${notes.length}</b></span>
+    <div class="pool-list">${notes.map(t=>`<label class="nchip ${t.target==='indesign'?'id':''}" title="${esc(t.text)}${t.by_name?' · '+esc(t.by_name):''}"><input type="checkbox" data-todo="${esc(t.id)}" aria-label="Fait"><b>p. ${t.page}</b>${esc(t.text)}${t.target==='indesign'?'<i>InDesign</i>':''}</label>`).join('')}</div>
+    <form class="rnote" id="rnote-form"><select class="f sm" id="rn-page" aria-label="Page de la note">${pages.map(p=>`<option value="${p}" ${p===pg?'selected':''}>p. ${p}</option>`).join('')}</select>
+      <input class="f sm" id="rn-text" placeholder="Noter quelque chose à faire sur cette page…" autocomplete="off" value="${esc(view.rnDraft||'')}">
+      <span class="seg sm" role="group" aria-label="À faire"><button type="button" data-act="td-target" data-t="site" aria-pressed="${tg==='site'}">Site</button><button type="button" data-act="td-target" data-t="indesign" aria-pressed="${tg==='indesign'}">InDesign</button></span>
+      <button class="btn sm primary" type="submit">Noter</button></form>`:'<span style="flex:1"></span>';
+  el.innerHTML=`<div class="pool rstrip"><div class="wrap">
+    <div class="rnav"><button class="btn sm" data-act="rk-step" data-d="-1" aria-label="Planche précédente">‹</button><select class="f sm" id="rk-sel" data-act="rk-sel" aria-label="Planche">${opts}</select><button class="btn sm" data-act="rk-step" data-d="1" aria-label="Planche suivante">›</button>
+      <span class="small muted nowrap"><b class="mono">${done}/${all.length}</b> terminés</span><button class="btn ghost sm" data-act="r-fs">${view.rfs?'Quitter le plein écran':'Plein écran'}</button></div>
+    <span class="rsep"></span>${notesHtml}</div></div>`;
+  if(keepFocus){const i=document.getElementById('rn-text');if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length)}}
+}
 function renderNotes(b){
   if(!cloudOn())return `<div class="panel emptystate"><h2>Notes</h2><p class="muted">Les notes sont enregistrées dans l'espace en ligne : connectez-vous pour les utiliser.</p></div>`;
   if(PJ.ok===false)return `<div class="panel emptystate"><h2>Notes</h2><p class="err">Les notes ne sont pas encore installées dans Supabase : lancez le script supabase-projets.sql, puis rechargez la page.</p></div>`;
@@ -1916,7 +1938,7 @@ document.addEventListener('click',async ev=>{
       if(view.files.armed!==k){view.files.armed=k;renderFiles();setTimeout(()=>{if(view.files&&view.files.armed===k){view.files.armed=null;renderFiles()}},4000);break}
       const r=pjDoc(bk,t.dataset.role);view.files.armed=null;if(!r)break;const {error}=await CLOUD.sb.from('project_docs').delete().eq('owner',r.owner).eq('book_id',r.book_id).eq('role',r.role);
       if(error){toast('Impossible de délier : '+error.message);break}PJ.docs.delete(pjKey(r.owner,r.book_id,r.role));renderFiles();softRender();toast(`« ${r.name} » n'est plus relié à « ${bk.title} »`);break}
-    case 'td-target':view.tdTarget=t.dataset.t;render();document.getElementById('td-text')?.focus();break;
+    case 'td-target':{const inStrip=!!t.closest('.rstrip');view.tdTarget=t.dataset.t;render();document.getElementById(inStrip?'rn-text':'td-text')?.focus();break}
     case 'td-showdone':view.tdDone=!view.tdDone;render();break;
     case 'td-go':{const p=+t.dataset.page;view.tab='redac';view.rk=spreadKeyOf(p);view.rsel=null;render();scrollUnderTabs('redac');break}
     case 'td-del':{const tt=pjTodos(b).find(x=>x.id===t.dataset.id);if(!tt)break;const k=tt.owner+'|'+tt.book_id;PJ.todos.set(k,pjTodos(b).filter(x=>x.id!==tt.id));render();
@@ -2067,12 +2089,14 @@ document.addEventListener('change',e=>{const t=e.target;
   if(t.id==='imp-sheet'){imp.sheet=+t.value;imp.result=imp.grids[imp.sheet];imp.error=imp.result?'':"Pas de chemin de fer reconnu sur cette feuille.";renderImpPreview()}
   else if(t.name==='imp-mode'){imp.mode=t.value;renderImpPreview()}
   else if(t.id==='imp-extend'){imp.extend=t.checked}
+  else if(t.id==='rn-page'){view.rnPage=+t.value}
   else if(t.dataset&&t.dataset.todo){const b=cur();if(b)tdPatch(b,t.dataset.todo,{done:t.checked,done_by:t.checked?myName():null,done_at:t.checked?new Date().toISOString():null})}
   else if(t.dataset&&t.dataset.tdedit){const b=cur();const v=t.value.trim();if(b&&v)tdPatch(b,t.dataset.tdedit,{text:v})}});
 document.addEventListener('input',e=>{const t=e.target;
   if(t.id==='mv-page'){mv.page=t.value;mv.mode='page';const r=document.querySelector('input[name="mv-mode"][value="page"]');if(r)r.checked=true;renderMovePreview()}
   else if(t.id==='mv-planche'){mv.planche=t.value;mv.mode='planche';const r=document.querySelector('input[name="mv-mode"][value="planche"]');if(r)r.checked=true;renderMovePreview()}
   else if(t.name==='mv-mode'){mv.mode=t.value;renderMovePreview()}});
+document.addEventListener('input',e=>{if(e.target.id==='rn-text')view.rnDraft=e.target.value});
 let impT=null;document.addEventListener('input',e=>{if(e.target.id==='imp-paste'){clearTimeout(impT);const v=e.target.value;impT=setTimeout(()=>{imp.src='';importText(v)},250)}});
 document.addEventListener('keydown',e=>{
   const mod=e.metaKey||e.ctrlKey;const k=(e.key||'').toLowerCase();
@@ -2215,6 +2239,11 @@ document.addEventListener('submit',e=>{
       else{view.cloudMsg='';view.cloudErr=false}render()})();return}
   if(f.id==='share-form'){const em=document.getElementById('share-email').value.trim().toLowerCase();if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){view.share.err='Adresse e-mail invalide.';renderShare();return}
     (async()=>{const {error}=await CLOUD.sb.from('book_shares').insert({book_id:view.share.book,email:em});if(error&&!/duplicate/i.test(error.message)){view.share.err="Invitation impossible : "+error.message}else{view.share.err='';view.share.list=[...(view.share.list||[]).filter(x=>x.email!==em),{email:em}]}renderShare()})();return}
+  if(f.id==='rnote-form'){const b=cur();if(!b||!cloudOn())return;const i=document.getElementById('rn-text');const text=i.value.trim();if(!text){i.focus();return}
+    const pg=parseInt(document.getElementById('rn-page').value,10);view.rnPage=pg;
+    const row={owner:ownerOf(b),book_id:b.id,id:uid('t'),text,target:view.tdTarget||'site',page:pg>0?pg:null,by_name:myName(),created_at:new Date().toISOString()};
+    pjPutTodo(row);i.value='';view.rnDraft='';render();setTimeout(()=>document.getElementById('rn-text')?.focus(),0);toast(`Note ajoutée pour la page ${pg}`);
+    (async()=>{const {created_at,...ins}=row;const {error}=await CLOUD.sb.from('project_todos').insert(ins);if(error){const k=row.owner+'|'+row.book_id;PJ.todos.set(k,(PJ.todos.get(k)||[]).filter(x=>x.id!==row.id));render();toast('Note non enregistrée : '+error.message)}})();return}
   if(f.id==='todo-form'){const b=cur();if(!b||!cloudOn())return;const text=document.getElementById('td-text').value.trim();if(!text){document.getElementById('td-text').focus();return}
     const pg=parseInt(document.getElementById('td-page').value,10);
     const row={owner:ownerOf(b),book_id:b.id,id:uid('t'),text,target:view.tdTarget||'site',page:pg>0?pg:null,by_name:myName(),created_at:new Date().toISOString()};
