@@ -60,10 +60,28 @@
     const onPage = it => !!safe(() => it.parentPage, null) && !eq(cn(safe(() => it.parentPage.parent, null)), 'MasterSpread');
     const anchored = it => eq(cn(safe(() => it.parent, null)), 'Character');
     function linkOf(fr) { return safe(() => { const g = els(fr.allGraphics)[0]; return g ? pathStr(g.itemLink.filePath) : ''; }, ''); }
+    // Photo block or decoration? A choice made in the panel (« Sélection : décor / bloc photo ») always wins. Otherwise an
+    // image from the book's photo folders, or the placeholder image, is a photo block; other PNG / PSD / TIFF / GIF
+    // images (cut-outs, illustrations, cards) and vector files are decoration; other images (JPG, HEIC…) are photos.
+    let curBook = null;
+    const DECOR_IMG = /\.(png|psd|psb|gif|tiff?|bmp|webp)$/i;
+    function inPhotos(ln, book) {
+      if (!book) return false; const p = '/' + String(ln).replace(/\\/g, '/').toLowerCase();
+      const names = [book.root, ...(book.folders || [])].filter(Boolean).map(n => '/' + String(n).toLowerCase() + '/');
+      return names.some(n => p.includes(n));
+    }
     function isPhotoFrame(it) {
       if (!FRAMES.includes(cn(it)) || anchored(it) || !onPage(it)) return false;
+      if (safe(() => it.extractLabel('mb-photo'), '')) return true;
       if (safe(() => it.extractLabel('mb-decor'), '')) return false;
-      const ln = linkOf(it); if (ln) return !DECOR.test(ln);
+      const ln = linkOf(it);
+      if (ln) {
+        if (DECOR.test(ln)) return false;
+        const base = ln.replace(/\\/g, '/').split('/').pop().toLowerCase();
+        if (curBook && (curBook.placeholders || []).includes(base)) return true;
+        if (inPhotos(ln, curBook)) return true;
+        return !DECOR_IMG.test(ln);
+      }
       // Empty frame: a photo block only if it is a graphic frame without a colour fill (coloured shapes are decoration)
       if (!safe(() => eq(it.contentType, E.ContentType.GRAPHIC_TYPE), false)) return false;
       const fill = safe(() => it.fillColor, null); const fname = String(safe(() => fill && fill.name, '') || '');
@@ -152,7 +170,7 @@
     function photoFrames(d) { const out = []; for (const sp of allSpreads(d)) for (const it of els(sp.allPageItems)) if (isPhotoFrame(it)) out.push(it); return out; }
     function stories(d) { return els(d.stories).filter(st => !storyOnlyGraphic(st) && storyPage(st)); }
     function readBlocks(d, opt) {
-      const out = [], cache = opt.cache || {}, only = opt.only ? new Set(opt.only) : null, book = opt.root;
+      const out = [], cache = opt.cache || {}, only = opt.only ? new Set(opt.only) : null, book = opt.root; if (book) curBook = book;
       for (const fr of photoFrames(d)) {
         const bid = 'f' + fr.id; if (only && !only.has(bid)) continue;
         const ln = linkOf(fr); if (!opt.full && !only && cache[bid] === ln) continue; cache[bid] = ln;
@@ -189,6 +207,17 @@
       safe(() => fr.fit(E.FitOptions.FILL_PROPORTIONALLY)); safe(() => fr.fit(E.FitOptions.CENTER_CONTENT));
     }
     function findFrame(d, id) { for (const sp of allSpreads(d)) for (const it of els(sp.allPageItems)) if (it.id === id) return it; return null; }
+    // « Sélection : décor / bloc photo » : the selected image frames switch between photo block and decoration
+    function toggleKind(d, book) {
+      if (book) curBook = book;
+      const frames = safe(() => els(app.selection), []).map(s => FRAMES.includes(cn(s)) ? s : safe(() => s.parent, null)).filter(f => f && FRAMES.includes(cn(f)));
+      let toDecor = 0, toPhoto = 0;
+      for (const f of frames) {
+        if (isPhotoFrame(f)) { f.insertLabel('mb-photo', ''); f.insertLabel('mb-decor', '1'); toDecor++; }
+        else { f.insertLabel('mb-decor', ''); f.insertLabel('mb-photo', '1'); toPhoto++; }
+      }
+      return { toDecor, toPhoto };
+    }
     function selectionBid(d) {
       const s = safe(() => els(app.selection), []).length ? safe(() => app.selection[0], null) : null; if (!s) return null;
       const k = cn(s);
@@ -228,6 +257,7 @@
       }, {});
     }
     function readStructure(d, book) {
+      if (book) curBook = book;
       const k = unitFactor(d), pages = [], storiesOut = {};
       const okStories = new Set(stories(d).map(st => st.id));
       for (const sp of allSpreads(d)) {
@@ -289,7 +319,7 @@
       if (i < u8.length) { const n = (u8[i] << 16) | ((i + 1 < u8.length ? u8[i + 1] : 0) << 8); s += A[n >> 18 & 63] + A[n >> 12 & 63] + (i + 1 < u8.length ? A[n >> 6 & 63] : '=') + '='; }
       return s;
     }
-    return { activeDoc, openDocKeys, docKey, isModified, docName, readBinding, writeBinding, clearBinding, readDocLabel, writeDocLabel, clearLegacy, findOpenDoc, bringToFront, openDoc, activePage, readBlocks, writeBlock, selectionBid, readStructure, exportPreview, relPath, b64 };
+    return { activeDoc, openDocKeys, docKey, isModified, docName, readBinding, writeBinding, clearBinding, readDocLabel, writeDocLabel, clearLegacy, findOpenDoc, bringToFront, openDoc, toggleKind, activePage, readBlocks, writeBlock, selectionBid, readStructure, exportPreview, relPath, b64 };
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = { makeDom }; else root.MBDom = { makeDom };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -102,7 +102,8 @@
           <p class="status ${engine.live ? 'live' : 'calm'}">${engine.live ? '● Synchronisation en direct' : '● Synchronisation au calme'}</p>
           <p class="muted">${engine.live ? 'Les modifications partent au fil de l\'eau ; les blocs que vous touchez sont réservés pour vous.' : 'Personne d\'autre n\'est actif : vos modifications partent à l\'enregistrement, celles du site arrivent toutes les 20 secondes.'}</p>
           ${others.length ? others.map(o => `<div class="pres"><span class="dot ${o.active ? '' : 'idle'}"></span>${esc(o.name)} ${o.client === 'site' ? 'sur le site' : 'dans InDesign'}${o.active ? '' : ' (inactif)'}</div>`).join('') : '<p class="muted">Personne d\'autre sur le livre.</p>'}
-          <div class="row"><button class="sm" id="now">Synchroniser maintenant</button><button class="sm" id="fix">Resynchroniser</button>${unl}</div></div>
+          <div class="row"><button class="sm" id="now">Synchroniser maintenant</button><button class="sm" id="fix">Resynchroniser</button>${unl}</div>
+          <div class="row" style="margin-top:6px"><button class="sm" id="kind">Sélection : décor ⇄ bloc photo</button></div></div>
         ${engine.waiting.size ? `<div class="box"><div class="row"><b>En attente (${engine.waiting.size})</b><span class="muted">blocs en cours sur le site</span><button class="sm" id="tgw">${ui.showWaiting ? 'Masquer' : 'Voir'}</button></div>${!ui.showWaiting ? '' : `<div class="scroll">${[...engine.waiting.entries()].map(([bid, r]) => `<div>${bid.charAt(0) === 's' ? 'Texte' : 'Photo'} p. ${esc(r && r.page || '?')} · ${esc(r && r.lock_name || 'quelqu\'un')}</div>`).join('')}</div>`}</div>` : ''}
         ${engine.conflicts.size ? `<div class="box"><b>À réconcilier (${engine.conflicts.size})</b>
           ${engine.conflicts.size > 1 ? `<div class="row" style="margin:6px 0"><button class="sm primary" id="all-site">Tout prendre du site</button><button class="sm" id="all-mine">Tout garder d'InDesign</button></div>` : ''}
@@ -141,6 +142,7 @@
       } else if (t.dataset && t.dataset.ch) { await engine.choose(doc, t.dataset.ch); await loadBooks(); }
       else if (t.id === 'unlink') { await engine.unlinkDoc(doc); await loadBooks(); }
       else if (t.id === 'now') { if (doc) { await engine.fetchChanged(); await engine.sync(doc, { full: true }); } }
+      else if (t.id === 'kind') { if (doc) await engine.toggleKind(doc); }
       else if (t.id === 'fix') { if (doc) await engine.resync(doc, engine.bind); }
       else if (t.id === 'tgw') { ui.showWaiting = !ui.showWaiting; render(); }
       else if (t.id === 'td-done') { ui.showDone = !ui.showDone; render(); }

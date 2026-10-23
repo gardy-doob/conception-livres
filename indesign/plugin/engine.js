@@ -166,6 +166,13 @@
       this.onChange();
     }
 
+    async toggleKind(doc) {
+      if (!doc) return; const r = this.dom.toggleKind(doc, this.book);
+      if (!r.toDecor && !r.toPhoto) { this.say('Sélectionnez d\'abord un ou plusieurs blocs image dans InDesign.'); return; }
+      this.say((r.toDecor ? r.toDecor + ' image(s) passée(s) en décor' : '') + (r.toDecor && r.toPhoto ? ', ' : '') + (r.toPhoto ? r.toPhoto + ' image(s) passée(s) en bloc photo' : '') + '. Enregistrez le document.');
+      if (this.bind) { await this.publishStructure(doc, {}); await this.sync(doc, { full: true }); }
+      this.onChange();
+    }
     // ---------- notes / à faire ----------
     async loadTodos() { if (!this.link) { this.todos = []; return; } try { this.todos = await this.api.todos(this.link.owner, this.link.book); } catch (e) {} this.t.todo = this.now(); }
     async todoDone(id, done) {

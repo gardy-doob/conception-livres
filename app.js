@@ -736,7 +736,7 @@ function renderBook(b){
       </div>
       <div class="bh-act">
         <div class="row" style="gap:6px;justify-content:flex-end">${inCreation(b)?'<span class="sync-chip" title="Les photos et les textes se synchronisent avec le panneau moodbook d\'InDesign">⇄ Synchronisé avec InDesign</span>':''}<button class="btn ${inCreation(b)?'':'primary'}" data-act="export-indd" ${m.placed||m.texts?'':'disabled'} title="${m.placed||m.texts?'Script InDesign : photos placées et textes rédigés':'Placez des photos ou rédigez des textes pour activer l\'export'}">Export InDesign</button><button class="btn" data-act="export-csv" ${m.placed?'':'disabled'}>CSV</button></div>
-        <div class="row" style="gap:6px;justify-content:flex-end">${cloudOn()&&!isShared(b)?`<button class="btn ghost sm" data-act="share">Partager</button>`:''}${isShared(b)?'':`<button class="btn ghost sm danger ${view.armed==='book'?'armed':''}" data-act="del-book">${view.armed==='book'?'Confirmer la suppression':'Supprimer le livre'}</button>`}</div>
+        <div class="row" style="gap:6px;justify-content:flex-end">${IS_ADMIN&&inCreation(b)?`<button class="btn ghost sm" data-act="diag" title="Télécharge les données de création de ce livre (structure, blocs, aperçus) pour le débogage">Diagnostic</button>`:''}${cloudOn()&&!isShared(b)?`<button class="btn ghost sm" data-act="share">Partager</button>`:''}${isShared(b)?'':`<button class="btn ghost sm danger ${view.armed==='book'?'armed':''}" data-act="del-book">${view.armed==='book'?'Confirmer la suppression':'Supprimer le livre'}</button>`}</div>
       </div>
     </header>
     <div id="presence-slot" class="presence">${inCreation(b)?presenceHtml():''}</div>
@@ -1421,7 +1421,7 @@ document.addEventListener('focusout',e=>{if(e.target&&e.target.id==='red-ed'){co
    La structure (pages, blocs, styles) vient du panneau InDesign (table creations). Chaque bloc photo et chaque texte
    est un enregistrement (table blocks) avec une version et un verrou : le site et InDesign écrivent bloc par bloc,
    jamais le livre entier, et une écriture sur une version périmée ou un bloc verrouillé est refusée. */
-const MB_VERSION='202610231221';
+const MB_VERSION='202610231432';
 const IS_ADMIN=()=>((CLOUD.user&&CLOUD.user.email)||'').toLowerCase()==='gardy.eugene@gmail.com';
 function fmtBuild(v){const m=String(v).match(/^(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)/);return m?`${m[3]}/${m[2]} ${m[4]}:${m[5]}`:v}
 function renderVersion(){const el=document.getElementById('ver-slot');if(!el)return;
@@ -1894,6 +1894,13 @@ document.addEventListener('click',async ev=>{
     case 'mep-settings':view.mepSettings=true;render();break;
     case 'legacy-del':{ev.preventDefault();if(view.armed!=='legacy'){arm('legacy');break}view.armed=null;remember(b);const n=b.layouts.length;b.layouts=[];b.spreads={};save(b);toastUndo(`${n} anciennes mises en page supprimées`);break}
     case 'share':openShare(b);break;
+    case 'diag':{const c=crOf(b);if(!c)break;const imgs={};for(const pg of c.data.pages||[])if(pg.img&&captures[crImg(b,pg.img)])imgs[pg.img]=captures[crImg(b,pg.img)];
+      const out={app:'moodbook-diagnostic',site:MB_VERSION,at:new Date().toISOString(),book:{id:b.id,title:b.title,pageCount:b.pageCount,photoRoot:b.photoRoot||'',folders:(b.photoFolders||[]).map(f=>f.name)},
+        files:['mep','livre'].map(r=>pjDoc(b,r)).filter(Boolean).map(({open_req,open_for,...r})=>r),creation:c.data,
+        blocks:[...c.rows.values()].map(r=>({bid:r.bid,kind:r.kind,page:r.page,data:r.data,rev:r.rev,src:r.src,committed:r.committed,deleted:r.deleted})),
+        missingPreviews:(c.data.pages||[]).filter(pg=>!pg.img||!captures[crImg(b,pg.img)]).map(pg=>pg.n),previews:imgs};
+      const name='diagnostic-'+(b.title||b.id).replace(/[^\w\u00C0-\u017F -]+/g,'').trim().replace(/\s+/g,'-')+'.json';
+      offerFile(name,new Blob([JSON.stringify(out)],{type:'application/json'}),'',name);toast('Diagnostic téléchargé : '+name);break}
     case 'pj-files':view.menu=false;openFiles(t.dataset.book||null);break;
     case 'pj-open':{const bk=books.get(t.dataset.book);if(bk){await pjOpen(bk,t.dataset.role,t.dataset.mode);toast(pjPanelOn()?'Demande envoyée au panneau InDesign':'Demande enregistrée : elle sera traitée dès que le panneau moodbook sera ouvert dans InDesign')}break}
     case 'pj-all':{for(const bk of [...books.values()].filter(x=>inCreation(x)&&pjDoc(x,'livre')))await pjOpen(bk,'livre','fix');toast('Demandes envoyées : chaque document est resynchronisé quand il passe au premier plan dans InDesign');break}
