@@ -253,7 +253,7 @@ async function cloudStart(){
         .on('postgres_changes',{event:'*',schema:'public',table:'project_docs'},pjOnDoc)
         .on('postgres_changes',{event:'*',schema:'public',table:'project_todos'},pjOnTodo)
         .on('postgres_changes',{event:'*',schema:'public',table:'creations'},pl=>{if(pl.new&&pl.new.book_id)crTake(pl.new).then(()=>softRender())})
-        .on('postgres_changes',{event:'*',schema:'public',table:'creation_images'},pl=>{const r=pl.new;const b=r&&books.get(r.book_id);if(b){captures[crImg(b,r.key)]=r.data;softRender()}})
+        .on('postgres_changes',{event:'*',schema:'public',table:'creation_images'},pl=>{const r=pl.new;const b=r&&books.get(r.book_id);if(b&&r.data){const k=crImg(b,r.key);captures[k]=r.data;if(IDB.ok)idbPut('cap:'+k,r.data).catch(()=>{});softRender()}})
         .on('postgres_changes',{event:'*',schema:'public',table:'book_versions',filter:'user_id=eq.'+CLOUD.user.id},pl=>{
           const k=(pl.new&&pl.new.key)||(pl.old&&pl.old.key);versions=versions.filter(v=>v.key!==k);
           if(pl.eventType!=='DELETE'){const v=pl.new;versions.push({key:v.key,id:v.book_id,t:+v.t,label:v.label,auto:v.auto,data:v.data})}renderHistSlot()})
@@ -1473,7 +1473,7 @@ document.addEventListener('focusout',e=>{if(e.target&&e.target.id==='red-ed'){co
    La structure (pages, blocs, styles) vient du panneau InDesign (table creations). Chaque bloc photo et chaque texte
    est un enregistrement (table blocks) avec une version et un verrou : le site et InDesign écrivent bloc par bloc,
    jamais le livre entier, et une écriture sur une version périmée ou un bloc verrouillé est refusée. */
-const MB_VERSION='202610231804';
+const MB_VERSION='202610231930';
 const IS_ADMIN=()=>((CLOUD.user&&CLOUD.user.email)||'').toLowerCase()==='gardy.eugene@gmail.com';
 function fmtBuild(v){const m=String(v).match(/^(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)/);return m?`${m[3]}/${m[2]} ${m[4]}:${m[5]}`:v}
 function renderVersion(){const el=document.getElementById('ver-slot');if(!el)return;
@@ -1609,9 +1609,21 @@ async function crTake(r){
   const b=books.get(r.book_id);if(!b)return;const old=CR.byBook.get(b.id);
   const c={owner:r.owner,data:r.data,rev:r.rev,rows:old?old.rows:new Map()};CR.byBook.set(b.id,c);
   if(!old){try{(await selectWhere('blocks','*',{owner:r.owner,book_id:r.book_id})).forEach(x=>c.rows.set(x.bid,x))}catch(e){}}
-  const need=(r.data.pages||[]).flatMap(p=>[p.img,p.bg]).filter(k=>k&&!captures[crImg(b,k)]);
-  if(need.length){try{(await selectWhere('creation_images','key,data',{owner:r.owner,book_id:r.book_id})).forEach(x=>{captures[crImg(b,x.key)]=x.data})}catch(e){}}
+  const keys=(r.data.pages||[]).flatMap(p=>[p.img,p.bg]).filter(Boolean);
+  // previews no longer used by the document: forgotten here and in this browser's cache
+  const keep=new Set(keys.map(k=>crImg(b,k)));for(const k of Object.keys(captures))if(k.startsWith('cr~'+b.id+'~')&&!keep.has(k)){delete captures[k];if(IDB.ok)idbDel('cap:'+k).catch(()=>{})}
   applyCreation(b);baseline(b);
+  crLoadImgs(b,r,keys);   // in the background, a few at a time: the book opens right away
+}
+// Page previews: fetched by small batches (a big book has hundreds), kept in this browser so a reload does not fetch them again
+async function crLoadImgs(b,r,keys){
+  const todo=keys.filter(k=>!captures[crImg(b,k)]);if(!todo.length)return;
+  CR.imgLoading=(CR.imgLoading||0)+todo.length;let done=0;
+  const batch=async part=>{for(let attempt=0;attempt<3;attempt++){try{const {data,error}=await CLOUD.sb.from('creation_images').select('key,data').eq('owner',r.owner).eq('book_id',r.book_id).in('key',part);if(error)throw error;
+      data.forEach(x=>{const k=crImg(b,x.key);captures[k]=x.data;if(IDB.ok)idbPut('cap:'+k,x.data).catch(()=>{})});return}catch(e){CR.imgErr=(e&&e.message)||String(e);await new Promise(z=>setTimeout(z,800*(attempt+1)))}}};
+  const parts=[];for(let i=0;i<todo.length;i+=6)parts.push(todo.slice(i,i+6));
+  let next=0;const worker=async()=>{while(next<parts.length){const part=parts[next++];await batch(part);done+=part.length;CR.imgLoading-=part.length;softRender()}};
+  await Promise.all([worker(),worker(),worker()]);
 }
 function crOnBlock(pl){
   const r=pl.new;if(!r||!r.book_id)return;const b=books.get(r.book_id);const c=crOf(b);if(!c||r.owner!==c.owner)return;
@@ -1983,7 +1995,7 @@ document.addEventListener('click',async ev=>{
       const out={app:'moodbook-diagnostic',site:MB_VERSION,at:new Date().toISOString(),book:{id:b.id,title:b.title,pageCount:b.pageCount,photoRoot:b.photoRoot||'',folders:(b.photoFolders||[]).map(f=>f.name)},
         files:['mep','livre'].map(r=>pjDoc(b,r)).filter(Boolean).map(({open_req,open_for,...r})=>r),creation:c.data,
         blocks:[...c.rows.values()].map(r=>({bid:r.bid,kind:r.kind,page:r.page,data:r.data,rev:r.rev,src:r.src,committed:r.committed,deleted:r.deleted})),
-        missingPreviews:(c.data.pages||[]).filter(pg=>!pg.img||!captures[crImg(b,pg.img)]).map(pg=>pg.n),previews:imgs};
+        imgErr:CR.imgErr||'',imgLoading:CR.imgLoading||0,missingPreviews:(c.data.pages||[]).filter(pg=>!pg.img||!captures[crImg(b,pg.img)]).map(pg=>pg.n),previews:imgs};
       const name='diagnostic-'+(b.title||b.id).replace(/[^\w\u00C0-\u017F -]+/g,'').trim().replace(/\s+/g,'-')+'.json';
       offerFile(name,new Blob([JSON.stringify(out)],{type:'application/json'}),'',name);toast('Diagnostic téléchargé : '+name);break}
     case 'pj-files':view.menu=false;openFiles(t.dataset.book||null);break;
