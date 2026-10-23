@@ -777,3 +777,4 @@ body.has-rbar .toast{bottom:calc(110px + env(safe-area-inset-bottom,0px))}
 .fr.tx .tfb{position:absolute;inset:0;pointer-events:none}
 .fr.tx.ghost .tmk,.fr.tx.ghost .tfb,.fr.tx.ghost .tfi{display:none}
 .fr.tx.ghost{color:transparent}
+.plv{overflow:hidden}

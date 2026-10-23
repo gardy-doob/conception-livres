@@ -315,7 +315,13 @@
           Object.assign(f, shapeOf(it));
           const bg = color(safe(() => it.fillColor, null), safe(() => it.fillTint, -1)); if (bg) f.bg = bg;
           const sw = safe(() => it.strokeWeight, 0); if (sw) { const sc = color(safe(() => it.strokeColor, null), safe(() => it.strokeTint, -1)); if (sc) f.sk = { w: r2(sw), c: sc }; }
-          if (kind === 'ph') f.bid = 'f' + it.id;
+          if (kind === 'ph') {
+            f.bid = 'f' + it.id;
+            // which image the preview shows in this block, and how it sits in it (crop, scale): part of the page signature
+            f.ln = linkOf(it).replace(/\\/g, '/').split('/').pop().toLowerCase();
+            const g = safe(() => els(it.allGraphics)[0], null); const gb = g ? safe(() => g.geometricBounds, null) : null;
+            if (Array.isArray(gb)) f.gc = gb.map(v => Math.round(v * 10) / 10).join(',');
+          }
           else {
             const st = it.parentStory, sid = String(st.id); f.bid = 's' + sid; f.st = sid;
             f.ci = Math.max(0, els(st.textContainers).findIndex(x => x.id === it.id));
@@ -329,10 +335,12 @@
         pgs.forEach((pg, q) => {
           const n = safe(() => pg.documentOffset, 0) + 1; const P = pb[q];
           const side = pgs.length >= 2 ? (q === 0 ? 'l' : 'r') : (safe(() => eq(pg.side, E.PageSideOptions.LEFT_HAND), false) ? 'l' : 'r');
-          const frames = per[q]; const th = {};
+          const frames = per[q]; const th = {}, pf = {};
           for (const f of frames) if (f.k === 'tx' && !(f.st in th)) th[f.st] = thash(storyText(f.st));
-          const sig = hash(JSON.stringify(frames.map(f => [f.bid, f.x, f.y, f.w, f.h, f.z, f.sh || '', f.cols || ''])) + JSON.stringify(th) + (P.x2 - P.x1) + 'x' + (P.y2 - P.y1));
-          pages.push({ n, name: safe(() => String(pg.name), String(n)), side, w: r2(P.x2 - P.x1), h: r2(P.y2 - P.y1), frames, sig, th });
+          for (const f of frames) if (f.k === 'ph') pf[f.bid] = f.ln || '';
+          const sig = hash(JSON.stringify(frames.map(f => [f.bid, f.x, f.y, f.w, f.h, f.z, f.sh || '', f.cols || '', f.ln || '', f.gc || ''])) + JSON.stringify(th) + (P.x2 - P.x1) + 'x' + (P.y2 - P.y1));
+          frames.forEach(f => { delete f.gc; delete f.ln; });
+          pages.push({ n, name: safe(() => String(pg.name), String(n)), side, w: r2(P.x2 - P.x1), h: r2(P.y2 - P.y1), frames, sig, th, pf });
         });
       }
       return { pages, stories: storiesOut };

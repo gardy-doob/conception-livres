@@ -1075,6 +1075,8 @@ function labRgb(L,a,bb){let y=(L+16)/116,x=a/500+y,z=y-bb/200;const f=t=>t**3>0.
 function cssColor(c){if(!c||!c.v)return '';let rgb;const v=c.v;
   if(c.s==='r')rgb=v.slice(0,3);else if(c.s==='l')rgb=labRgb(v[0],v[1],v[2]);else{const [C,M,Y,K]=v.map(x=>(x||0)/100);rgb=[255*(1-C)*(1-K),255*(1-M)*(1-K),255*(1-Y)*(1-K)]}
   const t=(c.t==null||c.t<0?100:c.t)/100;return `rgb(${rgb.map(x=>Math.round(255-(255-x)*t)).join(',')})`}
+// Création: the page preview already shows this block as InDesign has it (same image, with its crop, stroke, effects)
+const pvKeeps=(l,f,e)=>!!(l&&l.cr&&l.pf&&e&&(f.id in l.pf)&&l.pf[f.id]&&baseName(String(e.a.p||'').replace(/^abs:/,'')).toLowerCase()===l.pf[f.id]);
 // Small preview of a page layout (image exported by InDesign), with the blocks outlined if asked
 function plThumb(l,lines){if(!l)return '';const src=imgSrc(l.img);
   return `<div class="plv" style="aspect-ratio:${l.w}/${l.h}">${src?`<img class="plv-bg" src="${esc(src)}" alt="" loading="lazy">`:''}${lines?l.frames.map(f=>f.k==='ph'?`<div class="fr lin ph" style="${frStyle(f)}">${f.o+1}</div>`:`<div class="fr lin tx" style="${frStyle(f)}">${f.cols>1?f.cols+' col.':'T'}</div>`).join(''):''}</div>`}
@@ -1093,7 +1095,7 @@ function plBlocks(l,F,key,side){
   return `<div class="plv" style="aspect-ratio:${l.w}/${l.h};--hw:${(l.h/l.w).toFixed(4)}">${src?`<img class="plv-bg" src="${esc(src)}" alt="">`:''}${F.frs.map((f,j)=>{const e=F.map.get(f.id);const it=e&&lib.byPath.get(e.a.p);
     const lk=crr&&lockedByOther(crr.rows.get(f.id));
     if(lk)return `<div class="fr ph locked ${f.sh==='ov'?'ov':''}" style="${frStyle(f)}" title="En cours de modification par ${esc(lockWho(crr.rows.get(f.id)))}">${e&&it&&(it.big||it.thumb)?blockImg(it):''}<span class="lk">${I_LOCK}</span></div>`;
-    if(crr&&e&&!it)return `<div class="fr ph cr-keep" data-drop="blk" data-key="${key}" data-side="${side}" data-f="${esc(f.id)}" style="${frStyle(f)}" title="${esc(baseName(e.a.p))} (photo placée dans InDesign) · déposez une photo pour la remplacer"></div>`;
+    if(crr&&e&&(!it||pvKeeps(l,f,e)))return `<div class="fr ph cr-keep" data-drop="blk" data-key="${key}" data-side="${side}" data-f="${esc(f.id)}" style="${frStyle(f)}" title="${esc(baseName(e.a.p))} (photo placée dans InDesign) · déposez une photo pour la remplacer"></div>`;
     return `<div class="fr ph ${f.sh==='ov'?'ov':''} ${e?'full':''} ${crr&&!e?'cr-empty':''}" data-drop="blk" data-key="${key}" data-side="${side}" data-f="${esc(f.id)}" style="${frStyle(f)}" ${e?`draggable="true" data-drag="assigned" data-key="${key}" data-idx="${e.i}" ${it?`data-tid="${it.id}"`:''} title="${esc(e.a.p)} · glisser dans un autre bloc pour échanger"`:`title="Bloc ${j+1} : déposez une photo"`}>${e?(it&&(it.big||it.thumb)?blockImg(it):`<span class="nm">${esc(baseName(e.a.p))}</span>`)+`<button class="x" data-act="unassign" data-key="${key}" data-idx="${e.i}" aria-label="Retirer">×</button>`:j+1}</div>`}).join('')}</div>`;
 }
 function plPicker(b,page){
@@ -1287,7 +1289,7 @@ function rPage(b,key,p,side,l,stories){
   if(!p)return `<div class="rpage blank ${side}"></div>`;
   if(!l)return `<div class="rpage nolay ${side}"><span>p. ${p}<br>Pas de mise en page<br><button class="btn sm" data-act="r-plpick" data-page="${p}" style="margin-top:8px">Choisir</button></span></div>`;
   const W=l.w;const F=pageFill(l,sideEntries(b,key,side));
-  const ph=F.frs.map((f,j)=>{const e=F.map.get(f.id);const it=e&&lib.byPath.get(e.a.p);if(l.cr&&e&&!it)return '';if(l.cr&&!e)return `<div class="fr ph cr-empty ${f.sh==='ov'?'ov':''}" style="${frStyle(f)}"></div>`;return `<div class="fr ph ${f.sh==='ov'?'ov':''} ${e?'full':''}" style="${frStyle(f)}" ${it?`data-tid="${it.id}"`:''}>${e?(it&&(it.big||it.thumb)?blockImg(it):`<span class="nm">${esc(baseName(e.a.p))}</span>`):j+1}</div>`}).join('');
+  const ph=F.frs.map((f,j)=>{const e=F.map.get(f.id);const it=e&&lib.byPath.get(e.a.p);if(l.cr&&e&&(!it||pvKeeps(l,f,e)))return '';if(l.cr&&!e)return `<div class="fr ph cr-empty ${f.sh==='ov'?'ov':''}" style="${frStyle(f)}"></div>`;return `<div class="fr ph ${f.sh==='ov'?'ov':''} ${e?'full':''}" style="${frStyle(f)}" ${it?`data-tid="${it.id}"`:''}>${e?(it&&(it.big||it.thumb)?blockImg(it):`<span class="nm">${esc(baseName(e.a.p))}</span>`):j+1}</div>`}).join('');
   const tx=l.frames.filter(f=>f.k==='tx').map(f=>{const s=stories.find(x=>x.frames.some(y=>y.f===f&&y.page===p));if(!s)return '';const head=s.frames[0].f===f&&s.frames[0].page===p;
     const ins=f.ins||[0,0,0,0];const pad=`padding:${cq(ins[0],W)} ${cq(ins[3],W)} ${cq(ins[2],W)} ${cq(ins[1],W)};`;
     const cols=(f.cols||1)>1?`column-count:${f.cols};column-gap:${cq(f.gut||12,W)};`:'';const vj=(f.cols||1)===1&&f.vj&&f.vj!=='t'?{c:'safe center',b:'safe flex-end',j:'space-between'}[f.vj]:'';
@@ -1424,7 +1426,7 @@ document.addEventListener('focusout',e=>{if(e.target&&e.target.id==='red-ed'){co
    La structure (pages, blocs, styles) vient du panneau InDesign (table creations). Chaque bloc photo et chaque texte
    est un enregistrement (table blocks) avec une version et un verrou : le site et InDesign écrivent bloc par bloc,
    jamais le livre entier, et une écriture sur une version périmée ou un bloc verrouillé est refusée. */
-const MB_VERSION='202610231528';
+const MB_VERSION='202610231613';
 const IS_ADMIN=()=>((CLOUD.user&&CLOUD.user.email)||'').toLowerCase()==='gardy.eugene@gmail.com';
 function fmtBuild(v){const m=String(v).match(/^(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)/);return m?`${m[3]}/${m[2]} ${m[4]}:${m[5]}`:v}
 function renderVersion(){const el=document.getElementById('ver-slot');if(!el)return;
@@ -1460,7 +1462,7 @@ function applyCreation(b){
   const tol=0.006;const ord=arr=>arr.slice().sort((a,z)=>Math.abs(a.y-z.y)>tol?a.y-z.y:a.x-z.x).forEach((f,j)=>f.o=j);
   b.pl=d.pages.map(pg=>{const frames=pg.frames.map(f=>Object.assign({},f,{id:f.k==='ph'?f.bid:'t'+f.fid}));ord(frames.filter(f=>f.k==='ph'));ord(frames.filter(f=>f.k==='tx'));
     const stories={};frames.forEach(f=>{if(f.k==='tx'&&d.stories&&d.stories[f.st])stories[f.st]=d.stories[f.st]});
-    return {id:'cr'+pg.n,src:'cr',cr:true,name:'p. '+(pg.name||pg.n),pname:pg.name,side:pg.side,w:pg.w,h:pg.h,frames,stories,img:pg.img?'cap:'+crImg(b,pg.img):'',bg:pg.bg?'cap:'+crImg(b,pg.bg):'',th:pg.bg&&pg.th?pg.th:null,ph:[],order:pg.n,locked:false}});
+    return {id:'cr'+pg.n,src:'cr',cr:true,name:'p. '+(pg.name||pg.n),pname:pg.name,side:pg.side,w:pg.w,h:pg.h,frames,stories,img:pg.img?'cap:'+crImg(b,pg.img):'',bg:pg.bg?'cap:'+crImg(b,pg.bg):'',th:pg.bg&&pg.th?pg.th:null,pf:pg.bg&&pg.pf?pg.pf:null,ph:[],order:pg.n,locked:false}});
   b.pageLay={};d.pages.forEach(pg=>b.pageLay[pg.n]='cr'+pg.n);
   const maxP=Math.max(...d.pages.map(p=>p.n));if(maxP>b.pageCount)b.pageCount=maxP;
   const assign={};for(const [k,arr] of Object.entries(b.assign||{})){const loose=arr.filter(a=>!a.f);if(loose.length)assign[k]=loose.slice()}
