@@ -44,7 +44,7 @@
       this.conflicts = new Map(); this.waiting = new Map(); this.log = [];
       this.t = { poll: 0, scan: 0, beat: 0, pres: 0, saved: 0, req: 0, panel: 0, todo: 0 };
       this.selBid = null; this.lockBid = null; this.lockAt = 0; this.busy = false; this.since = '';
-      this.textCache = {}; this.lastActivity = 0; this.queued = new Set(); this.queuedFull = false;
+      this.textCache = {}; this.deferred = new Set(); this.lastActivity = 0; this.queued = new Set(); this.queuedFull = false;
     }
     say(msg) { this.log.unshift({ t: this.now(), msg }); this.log.length = Math.min(this.log.length, 40); this.onChange(); }
     key() { return this.bind ? 'mb:' + this.bind.owner + ':' + this.bind.book : ''; }
@@ -283,7 +283,8 @@
     }
     async applySite(doc, blk, row) {
       const { bid } = blk;
-      if (bid === this.selBid) return;               // the cursor is in this text: wait until it leaves it
+      // The cursor is in this text: wait until it leaves it (then it is applied). A selected photo frame is applied anyway.
+      if (blk.kind === 'tx' && bid === this.selBid) { if (!this.deferred.has(bid)) this.say(this.label(blk) + ' a changé sur le site : appliqué dès que le curseur quitte ce texte.'); this.deferred.add(bid); return; }
       const prevBase = this.st.base[bid];
       try { await this.dom.writeBlock(doc, blk, row.data, this.book); }
       catch (e) { this.say('Impossible d\'appliquer ' + this.label(blk) + ' : ' + e.message); return; }
@@ -390,7 +391,9 @@
       if (!bid || !this.rows.has(bid)) return;
       try {
         const res = await this.api.rpc('block_lock', { p_owner: this.bind.owner, p_book: this.bind.book, p_bid: bid, p_sid: this.sid, p_name: this.me.name, p_client: 'indesign', p_ttl: 60 });
-        if (res && res.row) this.rows.set(bid, res.row);
+        // Only the lock is taken from the answer: a newer content in it (written on the site meanwhile) must still be
+        // seen as a change by the next poll, otherwise it would never reach the document
+        if (res && res.row) { const old = this.rows.get(bid); this.rows.set(bid, old ? Object.assign({}, old, { lock_sid: res.row.lock_sid, lock_name: res.row.lock_name, lock_client: res.row.lock_client, lock_until: res.row.lock_until }) : res.row); }
         if (res && res.ok) { this.lockBid = bid; this.lockAt = this.now(); }
         else if (res && res.row) { this.lockBid = null; this.say('Attention : ' + (res.row.lock_name || 'quelqu\'un') + ' modifie ce bloc sur le site. Vos changements n\'y seront pas envoyés.'); }
       } catch (e) {}
@@ -418,7 +421,12 @@
       const mod = this.dom.isModified(doc);
       if (this.wasModified && !mod) { this.wasModified = false; this.t.saved = now; await this.onSaved(doc); return; }
       if (mod !== this.wasModified) { this.wasModified = mod; this.lastActivity = now; }
-      const sel = this.dom.selectionBid(doc); if (sel !== this.selBid) { this.selBid = sel; this.lastActivity = now; }
+      const sel = this.dom.selectionBid(doc);
+      if (sel !== this.selBid) {
+        this.selBid = sel; this.lastActivity = now;
+        const only = [...this.deferred].filter(b => b !== sel); only.forEach(b => this.deferred.delete(b));
+        if (only.length) await this.sync(doc, { only, noPush: true });
+      }
       if (now - this.t.beat > 20000) { this.t.beat = now; await this.beat(doc); }
       if (now - this.t.pres > (this.live ? 10000 : 30000)) { this.t.pres = now; await this.readPresence(); }
       if (this.live) await this.lock(sel); else if (this.lockBid) await this.unlock();
