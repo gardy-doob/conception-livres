@@ -24,7 +24,17 @@
     const docName = d => String(safe(() => d.name, '')).replace(/\.indd$/i, '');
     function readBinding(d) { try { const s = d.extractLabel('mb-book'); return s ? JSON.parse(s) : null; } catch (e) { return null; } }
     function writeBinding(d, b) { d.insertLabel('mb-book', JSON.stringify(b)); }
-    function clearBinding(d) { d.insertLabel('mb-book', ''); }
+    function readDocLabel(d) { try { const s = d.extractLabel('mb-doc'); return s ? JSON.parse(s) : null; } catch (e) { return null; } }
+    function writeDocLabel(d, v) { d.insertLabel('mb-doc', JSON.stringify(v)); }
+    function clearLegacy(d) { if (safe(() => d.extractLabel('mb-book'), '')) d.insertLabel('mb-book', ''); }
+    function clearBinding(d) { d.insertLabel('mb-book', ''); d.insertLabel('mb-doc', ''); }
+    function findOpenDoc(path) { return els(app.documents).find(d => docKey(d) === path) || null; }
+    function bringToFront(d) { try { app.activeDocument = d; } catch (e) { try { els(d.layoutWindows)[0].bringToFront(); } catch (e2) {} } }
+    async function openDoc(path) {
+      const lfs = uxp.storage && uxp.storage.localFileSystem; let entry = null;
+      if (lfs && lfs.getEntryWithUrl) { for (const u of ['file:' + path, path]) { try { entry = await lfs.getEntryWithUrl(u); if (entry) break; } catch (e) {} } }
+      try { return app.open(entry || path); } catch (e) { if (entry) return app.open(path); throw e; }
+    }
     function activePage(d) { return safe(() => String(app.activeWindow.activePage.name), ''); }
 
     // ---------- geometry (spread coordinates, points) ----------
@@ -279,7 +289,7 @@
       if (i < u8.length) { const n = (u8[i] << 16) | ((i + 1 < u8.length ? u8[i + 1] : 0) << 8); s += A[n >> 18 & 63] + A[n >> 12 & 63] + (i + 1 < u8.length ? A[n >> 6 & 63] : '=') + '='; }
       return s;
     }
-    return { activeDoc, openDocKeys, docKey, isModified, docName, readBinding, writeBinding, clearBinding, activePage, readBlocks, writeBlock, selectionBid, readStructure, exportPreview, relPath, b64 };
+    return { activeDoc, openDocKeys, docKey, isModified, docName, readBinding, writeBinding, clearBinding, readDocLabel, writeDocLabel, clearLegacy, findOpenDoc, bringToFront, openDoc, activePage, readBlocks, writeBlock, selectionBid, readStructure, exportPreview, relPath, b64 };
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = { makeDom }; else root.MBDom = { makeDom };
 })(typeof window !== 'undefined' ? window : globalThis);

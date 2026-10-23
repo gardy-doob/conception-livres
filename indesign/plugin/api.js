@@ -31,6 +31,16 @@
         const rows = await raw('/rest/v1/books?select=id,user_id,title:data->>title,year:data->>year&order=updated_at.desc');
         return rows.map(r => ({ id: r.id, owner: r.user_id, title: r.title || r.id, year: r.year, shared: session && r.user_id !== session.user.id }));
       },
+      async docByPath(path) { const a = await raw('/rest/v1/project_docs?select=*&path=eq.' + q(path)); return a.length ? a : raw('/rest/v1/project_docs?select=*&paths=cs.' + q(JSON.stringify([path]))); },
+      async docByUid(uid) { return raw('/rest/v1/project_docs?select=*&doc_uid=eq.' + q(uid)); },
+      async creationOf(owner, id) { const r = await raw('/rest/v1/creations?select=book_id&owner=eq.' + q(owner) + '&book_id=eq.' + q(id)); return r.length > 0; },
+      async projectDocs() { try { return await raw('/rest/v1/project_docs?select=owner,book_id,role,name,path'); } catch (e) { return []; } },
+      docUpdate(owner, id, role, patch) { return raw('/rest/v1/project_docs?owner=eq.' + q(owner) + '&book_id=eq.' + q(id) + '&role=eq.' + q(role), { method: 'PATCH', body: patch, headers: { Prefer: 'return=minimal' } }); },
+      docUnlink(owner, id, role) { return raw('/rest/v1/project_docs?owner=eq.' + q(owner) + '&book_id=eq.' + q(id) + '&role=eq.' + q(role), { method: 'DELETE', headers: { Prefer: 'return=minimal' } }); },
+      openRequests(email) { return raw('/rest/v1/project_docs?select=*&open_req=not.is.null&open_for=eq.' + q(String(email || '').toLowerCase())); },
+      todos(owner, id) { return raw('/rest/v1/project_todos?select=*&owner=eq.' + q(owner) + '&book_id=eq.' + q(id) + '&order=created_at.asc'); },
+      todoAdd(row) { return raw('/rest/v1/project_todos', { method: 'POST', body: row, headers: { Prefer: 'return=minimal' } }); },
+      todoPatch(owner, id, tid, patch) { return raw('/rest/v1/project_todos?owner=eq.' + q(owner) + '&book_id=eq.' + q(id) + '&id=eq.' + q(tid), { method: 'PATCH', body: patch, headers: { Prefer: 'return=minimal' } }); },
       async creations() { try { return await raw('/rest/v1/creations?select=owner,book_id,doc:data->>doc'); } catch (e) { return []; } },
       async bookInfo(owner, id) {
         const rows = await raw('/rest/v1/books?select=title:data->>title,root:data->>photoRoot,folders:data->photoFolders,pl:data->pl&user_id=eq.' + q(owner) + '&id=eq.' + q(id));

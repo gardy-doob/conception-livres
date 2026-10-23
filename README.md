@@ -31,6 +31,7 @@ l'application) et versement des textes rédigés, sans toucher à la mise en for
 
 ## Phase Création : synchronisation avec InDesign
 - Base : lancer aussi `supabase-creation.sql` (partage des livres, blocs, verrous, présence).
+- Base : lancer aussi `supabase-projets.sql` (un projet = un fichier de conception « Mon projet - MEP » + un fichier livre « Mon projet », reliés depuis le panneau ; notes / à faire).
 - Panneau InDesign : `indesign/moodbook.ccx` (double-clic pour l'installer, InDesign 2023 ou plus récent), sources dans `indesign/plugin/`.
 - « Passer en création » (dans le panneau, document final ouvert) envoie pages, blocs photo et textes ; la conception est alors terminée.
 - Chaque bloc a une version et un verrou ; synchronisation en direct seulement quand quelqu'un d'autre est actif sur le livre,
