@@ -235,11 +235,69 @@
       const base = book && book.root ? folderAbs(d, book.root) : null; return base ? base + '/' + p : null;
     }
     // Placing a file: InDesign's UXP API wants a file entry (a plain path gives « Impossible de créer la ressource de lien à partir de l'URI donné »)
+    async function entryOf(abs) {
+      const lfs = uxp.storage && uxp.storage.localFileSystem; if (!lfs || !lfs.getEntryWithUrl) return null;
+      for (const u of ['file:' + abs, 'file://' + encodeURI(abs), abs]) { try { const e = await lfs.getEntryWithUrl(u); if (e) return e; } catch (e) { /* next form */ } }
+      return null;
+    }
+    // What a file really is, from its first bytes (WhatsApp and phones sometimes give a .jpg that is something else)
+    function sniff(b) {
+      if (b[0] === 0xFF && b[1] === 0xD8) return 'jpeg';
+      if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) return 'png';
+      if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return 'webp';
+      if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) { const brand = String.fromCharCode(b[8], b[9], b[10], b[11]); return /avif|avis/.test(brand) ? 'avif' : 'heic'; }
+      return 'inconnu';
+    }
+    const FMT = { webp: 'WebP', heic: 'HEIC', avif: 'AVIF', png: 'PNG', inconnu: 'inconnu' };
+    // InDesign refuses some JPEG files (WhatsApp, progressive or slightly damaged ones): the panel decodes the photo itself and
+    // saves a clean copy (baseline JPEG, quality 92) next to it, « <nom> (moodbook).jpg », then places that copy. The original is not touched.
+    async function convertJpeg(abs, entry) {
+      const J = (typeof MBJpeg !== 'undefined' && MBJpeg) || (typeof globalThis !== 'undefined' && globalThis.MBJpeg) || null;
+      if (!J) throw new Error('module de conversion absent du panneau');
+      const bytes = new Uint8Array(await entry.read({ format: uxp.storage.formats.binary }));
+      const kind = sniff(bytes);
+      if (kind !== 'jpeg') throw new Error('ce fichier n\'est pas un vrai JPEG mais une image ' + FMT[kind] + ' : ouvrez-la dans Aperçu (Fichier › Exporter › JPEG) puis replacez-la');
+      let img;
+      const opts = { useTArray: true, formatAsRGBA: true, tolerantDecoding: true, maxResolutionInMP: 250, maxMemoryUsageInMB: 2048 };
+      try { img = J.decode(bytes, opts); }
+      catch (e) {
+        // A cut-off file (transfer interrupted, WhatsApp): close it with an end marker and read what is there
+        let ok = false;
+        if (!(bytes[bytes.length - 2] === 0xFF && bytes[bytes.length - 1] === 0xD9)) {
+          let end = bytes.length; while (end > 2 && bytes[end - 1] === 0) end--;
+          const fixed = new Uint8Array(end + 2); fixed.set(bytes.subarray(0, end)); fixed[end] = 0xFF; fixed[end + 1] = 0xD9;
+          try { img = J.decode(fixed, opts); ok = true; } catch (e2) { /* still unreadable */ }
+        }
+        if (!ok) throw new Error('photo illisible, même pour le panneau (' + (e.message || e) + ')');
+      }
+      const out = J.encode({ data: img.data, width: img.width, height: img.height }, 92).data;
+      const slash = abs.lastIndexOf('/'); const dir = abs.slice(0, slash); const name = abs.slice(slash + 1).replace(/\.[^.]+$/, '') + ' (moodbook).jpg';
+      const folder = await entryOf(dir); if (!folder || !folder.createFile) throw new Error('impossible d\'écrire dans le dossier de la photo');
+      const file = await folder.createFile(name, { overwrite: true });
+      await file.write(out.buffer ? out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) : out, { format: uxp.storage.formats.binary });
+      return { entry: file, path: dir + '/' + name, w: img.width, h: img.height };
+    }
     async function placeFile(fr, abs) {
-      const lfs = uxp.storage && uxp.storage.localFileSystem; let entry = null, lastErr = null;
-      if (lfs && lfs.getEntryWithUrl) for (const u of ['file:' + abs, 'file://' + encodeURI(abs), abs]) { try { entry = await lfs.getEntryWithUrl(u); if (entry) break; } catch (e) { lastErr = e; } }
-      if (entry) { try { fr.place(entry); return; } catch (e) { lastErr = e; } }
-      try { fr.place(abs); } catch (e) { throw new Error((lastErr && /not found|introuvable|exist/i.test(String(lastErr.message)) ? 'fichier introuvable : ' : '') + abs + ' (' + (e.message || e) + ')'); }
+      let entry = await entryOf(abs), firstErr = null;
+      try { fr.place(entry || abs); return null; } catch (e) { firstErr = e; }
+      if (!entry) throw new Error('fichier introuvable : ' + abs);
+      if (!/\.(jpe?g|jfif)$/i.test(abs)) throw new Error(abs + ' (' + (firstErr.message || firstErr) + ')');
+      // A copy converted earlier is reused
+      const copy = abs.replace(/\.[^.]+$/, '') + ' (moodbook).jpg'; const had = await entryOf(copy);
+      if (had) { try { fr.place(had); return { path: copy, reused: true }; } catch (e) { /* convert again */ } }
+      const c = await convertJpeg(abs, entry);
+      fr.place(c.entry);
+      return { path: c.path, w: c.w, h: c.h };
+    }
+    // « Placer une photo refusée… » : the selected frame receives a photo chosen on disk, converted if InDesign refuses it
+    async function pickAndPlace(d) {
+      const sel = safe(() => els(app.selection), []).map(x => FRAMES.includes(cn(x)) ? x : safe(() => x.parent, null)).find(f => f && FRAMES.includes(cn(f)));
+      if (!sel) throw new Error('sélectionnez d\'abord le bloc image dans InDesign');
+      const lfs = uxp.storage.localFileSystem; const f = await lfs.getFileForOpening({ types: ['jpg', 'jpeg', 'jfif', 'JPG', 'JPEG'] });
+      if (!f) return null;
+      const abs = f.nativePath; const conv = await placeFile(sel, abs);
+      safe(() => sel.fit(E.FitOptions.FILL_PROPORTIONALLY)); safe(() => sel.fit(E.FitOptions.CENTER_CONTENT));
+      return { name: abs.split('/').pop(), converted: conv ? conv.path : null };
     }
     async function writeBlock(d, blk, data, book) {
       if (blk.kind === 'tx') {
@@ -249,8 +307,9 @@
       const fr = findFrame(d, +String(blk.bid).slice(1)); if (!fr) throw new Error('bloc photo introuvable');
       if (!data || !data.p) { for (const g of els(fr.allGraphics)) safe(() => g.remove()); return; }
       const abs = absPath(d, data.p, book); if (!abs) throw new Error('dossier photos introuvable pour « ' + data.p + ' »');
-      await placeFile(fr, abs);
+      const conv = await placeFile(fr, abs);
       safe(() => fr.fit(E.FitOptions.FILL_PROPORTIONALLY)); safe(() => fr.fit(E.FitOptions.CENTER_CONTENT));
+      return conv ? { converted: conv.path, reused: !!conv.reused } : null;
     }
     function findFrame(d, id) { for (const sp of allSpreads(d)) for (const it of els(sp.allPageItems)) if (it.id === id) return it; return null; }
     // « Sélection : décor / bloc photo » : the selected image frames switch between photo block and decoration
@@ -376,7 +435,7 @@
       if (i < u8.length) { const n = (u8[i] << 16) | ((i + 1 < u8.length ? u8[i + 1] : 0) << 8); s += A[n >> 18 & 63] + A[n >> 12 & 63] + (i + 1 < u8.length ? A[n >> 6 & 63] : '=') + '='; }
       return s;
     }
-    return { activeDoc, openDocKeys, docKey, refreshKeys, forgetKey, thash, isModified, docName, readBinding, writeBinding, clearBinding, readDocLabel, writeDocLabel, clearLegacy, findOpenDoc, bringToFront, openDoc, toggleKind, activePage, readBlocks, writeBlock, selectionBid, readStructure, exportPreview, relPath, b64 };
+    return { activeDoc, openDocKeys, docKey, refreshKeys, forgetKey, thash, isModified, docName, readBinding, writeBinding, clearBinding, readDocLabel, writeDocLabel, clearLegacy, findOpenDoc, bringToFront, openDoc, toggleKind, pickAndPlace, activePage, readBlocks, writeBlock, selectionBid, readStructure, exportPreview, relPath, b64 };
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = { makeDom }; else root.MBDom = { makeDom };
 })(typeof window !== 'undefined' ? window : globalThis);

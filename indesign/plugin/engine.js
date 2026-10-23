@@ -286,7 +286,10 @@
       // The cursor is in this text: wait until it leaves it (then it is applied). A selected photo frame is applied anyway.
       if (blk.kind === 'tx' && bid === this.selBid) { if (!this.deferred.has(bid)) this.say(this.label(blk) + ' a changé sur le site : appliqué dès que le curseur quitte ce texte.'); this.deferred.add(bid); return; }
       const prevBase = this.st.base[bid];
-      try { await this.dom.writeBlock(doc, blk, row.data, this.book); }
+      try {
+        const w = await this.dom.writeBlock(doc, blk, row.data, this.book);
+        if (w && w.converted) this.say('Photo p. ' + (blk.page || '?') + ' refusée par InDesign (JPEG de WhatsApp ou abîmé) : ' + (w.reused ? 'copie déjà convertie utilisée' : 'convertie par le panneau') + ' → ' + w.converted.split('/').pop());
+      }
       catch (e) { this.say('Impossible d\'appliquer ' + this.label(blk) + ' : ' + e.message); return; }
       // Remember the text as InDesign reads it back (not as the site sent it)
       let dh = hash(blk.kind, row.data);

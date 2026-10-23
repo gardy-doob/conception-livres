@@ -111,6 +111,7 @@
             <div class="row"><button class="sm" data-res="mine" data-bid="${bid}">Garder InDesign</button><button class="sm" data-res="site" data-bid="${bid}">Prendre le site</button>${c.blk.kind === 'tx' ? `<button class="sm" data-res="both" data-bid="${bid}">Les deux</button>` : ''}</div></div>`).join('')}</div></div>` : ''}`;
       }
       body += todoBox();
+      body += `<div class="box"><div class="row"><b>Photo refusée par InDesign ?</b></div><p class="muted">Les photos de WhatsApp sont parfois refusées (« erreur de lecture d'une image JPEG »). Sélectionnez le bloc, puis choisissez la photo : le panneau la convertit si besoin et la place.</p><div class="row"><button class="sm" id="pick">Placer une photo…</button></div></div>`;
     }
     const focus = document.activeElement && document.activeElement.id; const keep = focus && $(focus) && $(focus).value;
     el.innerHTML = `<div class="row muted">${esc(engine.me.email)} <button class="sm" id="out">Se déconnecter</button></div>${body}
@@ -142,6 +143,7 @@
       else if (t.id === 'unlink') { await engine.unlinkDoc(doc); await loadBooks(); }
       else if (t.id === 'now') { if (doc) { await engine.fetchChanged(); await engine.sync(doc, { full: true }); } }
       else if (t.id === 'kind') { if (doc) await engine.toggleKind(doc); }
+      else if (t.id === 'pick') { if (doc) { const r = await dom.pickAndPlace(doc); if (r) engine.say(r.converted ? '« ' + r.name + ' » refusée par InDesign : convertie et placée (' + r.converted.split('/').pop() + ').' : '« ' + r.name + ' » placée.'); } }
       else if (t.id === 'fix') { if (doc) await engine.resync(doc, engine.bind); }
       else if (t.id === 'tgw') { ui.showWaiting = !ui.showWaiting; render(); }
       else if (t.id === 'td-done') { ui.showDone = !ui.showDone; render(); }
