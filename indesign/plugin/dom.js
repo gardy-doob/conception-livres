@@ -250,7 +250,7 @@
     }
     const FMT = { webp: 'WebP', heic: 'HEIC', avif: 'AVIF', png: 'PNG', inconnu: 'inconnu' };
     // InDesign refuses some JPEG files (WhatsApp, progressive or slightly damaged ones): the panel decodes the photo itself and
-    // saves a clean copy (baseline JPEG, quality 92) next to it, « <nom> (moodbook).jpg », then places that copy. The original is not touched.
+    // saves a clean copy (baseline JPEG, quality 92) next to it, « <nom>_converted.jpg », then places that copy. The original is not touched.
     async function convertJpeg(abs, entry) {
       const J = (typeof MBJpeg !== 'undefined' && MBJpeg) || (typeof globalThis !== 'undefined' && globalThis.MBJpeg) || null;
       if (!J) throw new Error('module de conversion absent du panneau');
@@ -271,7 +271,7 @@
         if (!ok) throw new Error('photo illisible, même pour le panneau (' + (e.message || e) + ')');
       }
       const out = J.encode({ data: img.data, width: img.width, height: img.height }, 92).data;
-      const slash = abs.lastIndexOf('/'); const dir = abs.slice(0, slash); const name = abs.slice(slash + 1).replace(/\.[^.]+$/, '') + ' (moodbook).jpg';
+      const slash = abs.lastIndexOf('/'); const dir = abs.slice(0, slash); const name = abs.slice(slash + 1).replace(/\.[^.]+$/, '') + '_converted.jpg';
       const folder = await entryOf(dir); if (!folder || !folder.createFile) throw new Error('impossible d\'écrire dans le dossier de la photo');
       const file = await folder.createFile(name, { overwrite: true });
       await file.write(out.buffer ? out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) : out, { format: uxp.storage.formats.binary });
@@ -283,7 +283,7 @@
       if (!entry) throw new Error('fichier introuvable : ' + abs);
       if (!/\.(jpe?g|jfif)$/i.test(abs)) throw new Error(abs + ' (' + (firstErr.message || firstErr) + ')');
       // A copy converted earlier is reused
-      const copy = abs.replace(/\.[^.]+$/, '') + ' (moodbook).jpg'; const had = await entryOf(copy);
+      const copy = abs.replace(/\.[^.]+$/, '') + '_converted.jpg'; const had = await entryOf(copy);
       if (had) { try { fr.place(had); return { path: copy, reused: true }; } catch (e) { /* convert again */ } }
       const c = await convertJpeg(abs, entry);
       fr.place(c.entry);

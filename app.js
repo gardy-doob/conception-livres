@@ -1123,8 +1123,8 @@ function cssColor(c){if(!c||!c.v)return '';let rgb;const v=c.v;
   if(c.s==='r')rgb=v.slice(0,3);else if(c.s==='l')rgb=labRgb(v[0],v[1],v[2]);else{const [C,M,Y,K]=v.map(x=>(x||0)/100);rgb=[255*(1-C)*(1-K),255*(1-M)*(1-K),255*(1-Y)*(1-K)]}
   const t=(c.t==null||c.t<0?100:c.t)/100;return `rgb(${rgb.map(x=>Math.round(255-(255-x)*t)).join(',')})`}
 // Création: the page preview already shows this block as InDesign has it (same image, with its crop, stroke, effects)
-// (a copy converted by the panel, « nom (moodbook).jpg », counts as the same photo)
-const pvName=n=>String(n||'').toLowerCase().replace(/\.[^.\/]+$/,'').replace(/ \(moodbook\)$/,'');
+// (a copy converted by the panel, « nom_converted.jpg », counts as the same photo)
+const pvName=n=>String(n||'').toLowerCase().replace(/\.[^.\/]+$/,'').replace(/(_converted| \(moodbook\))$/,'');
 const pvKeeps=(l,f,e)=>!!(l&&l.cr&&l.pf&&e&&(f.id in l.pf)&&l.pf[f.id]&&pvName(baseName(String(e.a.p||'').replace(/^abs:/,'')))===pvName(l.pf[f.id]));
 // Small preview of a page layout (image exported by InDesign), with the blocks outlined if asked
 function plThumb(l,lines){if(!l)return '';const src=imgSrc(l.img);
@@ -1475,7 +1475,7 @@ document.addEventListener('focusout',e=>{if(e.target&&e.target.id==='red-ed'){co
    La structure (pages, blocs, styles) vient du panneau InDesign (table creations). Chaque bloc photo et chaque texte
    est un enregistrement (table blocks) avec une version et un verrou : le site et InDesign écrivent bloc par bloc,
    jamais le livre entier, et une écriture sur une version périmée ou un bloc verrouillé est refusée. */
-const MB_VERSION='202610232000';
+const MB_VERSION='202610232002';
 const IS_ADMIN=()=>((CLOUD.user&&CLOUD.user.email)||'').toLowerCase()==='gardy.eugene@gmail.com';
 function fmtBuild(v){const m=String(v).match(/^(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)/);return m?`${m[3]}/${m[2]} ${m[4]}:${m[5]}`:v}
 function renderVersion(){const el=document.getElementById('ver-slot');if(!el)return;
