@@ -224,6 +224,9 @@ function takeRemoteBook(id,data,owner){const nb=normBook({...clone(data),id});if
 async function cloudStart(){
   if(!cloudOn()||CLOUD.busy)return;CLOUD.busy=true;setSaved('Synchronisation…');
   try{
+    let last='';try{last=localStorage.getItem('mb-owner')||''}catch(e){}
+    if(last&&last!==CLOUD.user.id){const ids=[...books.keys()];books.clear();versions=[];CLOUD.pending.clear();try{savePending()}catch(e){}if(IDB.ok)ids.forEach(id=>idbDel('book:'+id).catch(()=>{}))}
+    try{localStorage.setItem('mb-owner',CLOUD.user.id)}catch(e){}
     loadPending();
     let rows;try{rows=await selectAll('books','id,data,updated_at,user_id')}catch(e){rows=await selectAll('books','id,data,updated_at')}
     const remote=new Map();for(const r of rows){const mine=!r.user_id||r.user_id===CLOUD.user.id;if(!remote.has(r.id)||mine)remote.set(r.id,r)}
@@ -266,8 +269,48 @@ async function cloudInit(){
   if(!cloudConfigured())return;
   CLOUD.sb=window.supabase.createClient(CLOUD.cfg.supabaseUrl,CLOUD.cfg.supabaseKey,{auth:{persistSession:true,autoRefreshToken:true,storageKey:'cdf-auth'}});
   try{const {data}=await CLOUD.sb.auth.getSession();CLOUD.user=data.session?data.session.user:null}catch(e){}
-  CLOUD.sb.auth.onAuthStateChange((ev,sess)=>{const u=sess?sess.user:null;const changed=(u&&u.id)!==(CLOUD.user&&CLOUD.user.id);CLOUD.user=u;if(changed){if(u)cloudStart();else{if(CLOUD.channel){CLOUD.sb.removeChannel(CLOUD.channel);CLOUD.channel=null}setSaved('Déconnecté · enregistré dans ce navigateur');render()}}});
+  CLOUD.checked=true;
+  CLOUD.sb.auth.onAuthStateChange((ev,sess)=>{const u=sess?sess.user:null;const changed=(u&&u.id)!==(CLOUD.user&&CLOUD.user.id);CLOUD.user=u;if(changed){if(u)cloudStart();else{if(CLOUD.channel){CLOUD.sb.removeChannel(CLOUD.channel);CLOUD.channel=null}forgetAccount();setSaved('');render()}}});
   if(CLOUD.user)await cloudStart();else render();
+}
+function forgetAccount(){
+  const ids=[...books.keys()];books.clear();versions=[];CR.byBook.clear();PJ.docs.clear();PJ.todos.clear();CLOUD.pending.clear();try{savePending()}catch(e){}
+  if(IDB.ok){ids.forEach(id=>idbDel('book:'+id).catch(()=>{}));}loaded=false;view.files=null;view.accounts=null;location.hash='#avancement';
+}
+const genPass=()=>{const a='abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';const r=crypto.getRandomValues(new Uint32Array(12));return [...r].map(x=>a[x%a.length]).join('').replace(/(.{4})(?!$)/g,'$1-')};
+async function acctCall(body){const {data,error}=await CLOUD.sb.functions.invoke('comptes',{body});
+  if(error){let m=error.message||'';try{const j=await error.context.json();if(j&&j.error)m=j.error}catch(e){}if(/not found|404|Failed to send/i.test(m))m="La fonction « comptes » n'est pas encore installée dans Supabase.";throw new Error(m)}
+  if(data&&data.error)throw new Error(data.error);return data}
+async function openAccounts(){view.menu=false;view.accounts={list:null,err:'',msg:'',draft:{email:'',password:genPass()},armed:null,shown:null};renderAccounts();
+  try{view.accounts.list=(await acctCall({action:'list'})).users}catch(e){view.accounts.err=e.message}renderAccounts()}
+function renderAccounts(){const v=view.accounts;if(!v)return;const me=myId();
+  const row=u=>{const arm=v.armed===u.id;return `<div class="acct ${u.disabled?'off':''}"><div class="acct-n"><b>${esc(u.email)}</b><span class="small muted">créé ${u.created_at?fmtVer(u.created_at):'—'} · dernière connexion ${u.last_sign_in_at?fmtVer(u.last_sign_in_at):'jamais'}${u.disabled?' · <b class="err">désactivé</b>':''}${u.id===me?' · vous':''}</span>
+    ${v.shown&&v.shown.id===u.id?`<span class="acct-pw">Nouveau mot de passe : <code>${esc(v.shown.password)}</code> <button class="btn ghost sm" data-act="acct-copy">Copier</button></span>`:''}</div>
+    <div class="acct-a">${u.id===me?'':`<button class="btn ghost sm" data-act="acct-pass" data-id="${esc(u.id)}">Nouveau mot de passe</button><button class="btn ghost sm" data-act="${u.disabled?'acct-enable':'acct-disable'}" data-id="${esc(u.id)}">${u.disabled?'Réactiver':'Désactiver'}</button><button class="btn ghost sm danger ${arm?'armed':''}" data-act="acct-del" data-id="${esc(u.id)}" title="Supprime le compte et les livres dont il est propriétaire">${arm?'Confirmer : compte et livres supprimés':'Supprimer'}</button>`}</div></div>`};
+  showModal(`<div class="row" style="justify-content:space-between"><h3>Comptes des utilisateurs</h3><button class="btn ghost sm" data-act="close-overlay">Fermer</button></div>
+    <p class="small muted" style="margin:0">Personne ne peut créer de compte seul : vous créez chaque compte ici et transmettez l'adresse et le mot de passe à la personne. Elle pourra ensuite le changer (menu › Changer mon mot de passe). Pour qu'elle voie un livre, partagez-le avec son adresse (bouton Partager du livre).</p>
+    <form class="acct-new" id="acct-form" novalidate><input class="f" id="ac-email" type="email" placeholder="Adresse e-mail" autocomplete="off" value="${esc(v.draft.email)}">
+      <span class="acct-pwin"><input class="f mono" id="ac-pass" type="text" autocomplete="off" value="${esc(v.draft.password)}" aria-label="Mot de passe"><button class="btn ghost sm" type="button" data-act="acct-gen" title="Générer un autre mot de passe">↻</button></span>
+      <button class="btn primary" type="submit">Créer le compte</button></form>
+    ${v.msg?`<p class="small ok-msg" role="status" style="margin:0">${v.msg}</p>`:''}${v.err?`<p class="err small" role="alert" style="margin:0">${esc(v.err)}</p>`:''}
+    <div class="acct-list">${v.list?v.list.map(row).join('')||'<p class="small muted">Aucun compte.</p>':(v.err?'':'<p class="small muted">Chargement…</p>')}</div>`,'wide');
+}
+async function acctDo(action,id,extra){const v=view.accounts;v.err='';v.msg='';try{const r=await acctCall(Object.assign({action,id},extra||{}));
+  if(r&&r.user){const i=v.list.findIndex(x=>x.id===r.user.id);if(i>=0)v.list[i]=r.user;else v.list.push(r.user)}if(action==='delete')v.list=v.list.filter(x=>x.id!==id);return r}catch(e){v.err=e.message;return null}finally{renderAccounts()}}
+function openMyPass(){view.menu=false;view.myPass={err:'',ok:false};renderMyPass()}
+function renderMyPass(){const v=view.myPass;if(!v)return;
+  showModal(`<div class="row" style="justify-content:space-between"><h3>Changer mon mot de passe</h3><button class="btn ghost sm" data-act="close-overlay">Fermer</button></div>
+    ${v.ok?`<p class="small" role="status">Mot de passe changé.</p>`:`<form class="grid" id="mypass-form" novalidate style="display:grid;gap:8px"><input class="f" id="mp-1" type="password" autocomplete="new-password" placeholder="Nouveau mot de passe (8 caractères min.)"><input class="f" id="mp-2" type="password" autocomplete="new-password" placeholder="Le même, une seconde fois"><button class="btn primary" type="submit">Enregistrer</button>${v.err?`<p class="err small" role="alert" style="margin:0">${esc(v.err)}</p>`:''}</form>`}`);
+  setTimeout(()=>document.getElementById('mp-1')?.focus(),0)}
+function renderGate(){
+  return `<div class="gate"><form class="panel gatebox" id="cloud-login" novalidate>
+    <div class="gate-h"><span class="brand-mark" aria-hidden="true"><i></i><i></i></span><b>moodbook</b><span class="muted">conception livre</span></div>
+    <p class="small muted" style="margin:0">Connectez-vous avec le compte que l'administrateur vous a créé.</p>
+    <label class="small">Adresse e-mail<input class="f" id="cl-email" type="email" autocomplete="email" value="${esc(view.cloudEmail||'')}"></label>
+    <label class="small">Mot de passe<input class="f" id="cl-pass" type="password" autocomplete="current-password"></label>
+    <button class="btn primary" type="submit" data-mode="in">Se connecter</button>
+    ${view.cloudMsg?`<p class="small ${view.cloudErr?'err':'muted'}" role="alert" style="margin:0">${esc(view.cloudMsg)}</p>`:''}
+    <p class="small muted" style="margin:0">Pas de compte, ou mot de passe oublié ? Demandez-le à l'administrateur.</p></form></div>`;
 }
 function renderCloudBox(){
   if(!cloudConfigured()||CLOUD.user)return '';
@@ -275,7 +318,7 @@ function renderCloudBox(){
     <div><b>Votre espace en ligne</b><p class="small muted" style="margin:2px 0 0">Connectez-vous pour enregistrer vos livres en ligne et les retrouver sur tous vos ordinateurs. Les photos restent sur votre ordinateur.</p></div>
     <input class="f" id="cl-email" type="email" autocomplete="email" placeholder="Adresse e-mail" value="${esc(view.cloudEmail||'')}">
     <input class="f" id="cl-pass" type="password" autocomplete="current-password" placeholder="Mot de passe (6 caractères min.)">
-    <button class="btn primary" type="submit" data-mode="in">Se connecter</button><button class="btn" type="submit" data-mode="up">Créer mon compte</button>
+    <button class="btn primary" type="submit" data-mode="in">Se connecter</button>
     ${view.cloudMsg?`<p class="small ${view.cloudErr?'err':'muted'}" style="grid-column:1/-1;margin:0">${esc(view.cloudMsg)}</p>`:''}</form>`;
 }
 async function loadIDB(){
@@ -501,7 +544,7 @@ async function offerFile(filename,data,fallbackText,fallbackName){
   showModal(`<h3>Téléchargement indisponible ici</h3><p class="muted small">Copiez le texte ci-dessous et enregistrez-le dans un fichier nommé <b>${esc(fallbackName||filename)}</b>.</p><textarea readonly id="fallback-text">${esc(fallbackText||'')}</textarea><div class="row"><button class="btn primary" data-act="copy-fallback">Copier</button><button class="btn" data-act="close-overlay">Fermer</button></div>`);
 }
 function showModal(html,cls){document.getElementById('overlay').innerHTML=`<div class="overlay" data-act="overlay-bg"><div class="modal ${cls||''}" role="dialog" aria-modal="true">${html}</div></div>`}
-function closeOverlay(){view.mepSettings=false;view.share=null;view.files=null;document.getElementById('overlay').innerHTML='';if(lightbox&&lightbox.url)URL.revokeObjectURL(lightbox.url);lightbox=null}
+function closeOverlay(){view.mepSettings=false;view.share=null;view.files=null;view.accounts=null;view.myPass=null;document.getElementById('overlay').innerHTML='';if(lightbox&&lightbox.url)URL.revokeObjectURL(lightbox.url);lightbox=null}
 
 /* ================= photo library (EXIF) ================= */
 function parseTiff(v,t){
@@ -630,6 +673,10 @@ window.addEventListener('hashchange',()=>{readHash();render();window.scrollTo(0,
 
 /* ================= render ================= */
 function render(){
+  const gated=cloudConfigured()&&!CLOUD.user;document.body.classList.toggle('gated',gated);
+  if(gated){document.getElementById('nav').innerHTML='';document.getElementById('burger-slot').innerHTML='';document.getElementById('hist-slot').innerHTML='';
+    document.getElementById('app').innerHTML=CLOUD.checked?renderGate():loadingState();['pool','rbarslot'].forEach(id=>{const e=document.getElementById(id);if(e)e.innerHTML=''});
+    document.body.classList.remove('has-pool','has-rbar');setTimeout(()=>{const e=document.getElementById(view.cloudEmail?'cl-pass':'cl-email');if(e&&!document.activeElement.closest('#cloud-login'))e.focus()},0);return}
   const nav=document.getElementById('nav');const b=view.route==='livre'?books.get(view.id):null;
   renderVersion();const nv=renderNav(b);nav.innerHTML=nv.links;document.getElementById('burger-slot').innerHTML=nv.burger;renderHistSlot();
   const app=document.getElementById('app');
@@ -650,7 +697,7 @@ function renderNav(b){
   const years=[...new Set(all.map(x=>+x.year||0))].sort((a,z)=>z-a);
   return {links:`<a href="#avancement" ${view.route==='avancement'?'aria-current="page"':''}>Avancement</a>${recent.map(x=>`<a href="#livre-${esc(x.id)}" ${b&&x.id===b.id?'aria-current="page"':''}>${esc(x.title)}</a>`).join('')}`,burger:`
     <span class="burger"><button class="icon-btn" data-act="menu" aria-expanded="${!!view.menu}" aria-label="Tous les livres" title="Tous les livres"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
-    ${view.menu?`<div class="menu panel">${years.map(y=>`<div class="menu-y">${y||'Sans année'}</div>${all.filter(x=>(+x.year||0)===y).sort((a,z)=>(a.order??999)-(z.order??999)||a.title.localeCompare(z.title)).map(x=>`<a href="#livre-${esc(x.id)}" ${b&&x.id===b.id?'aria-current="page"':''}>${esc(x.title)}</a>`).join('')}`).join('')}<div class="menu-sep"></div><a href="#avancement">Avancement de tous les livres</a><div class="menu-sep"></div>${cloudConfigured()?(CLOUD.user?`<div class="menu-y">En ligne</div><div class="small muted" style="padding:2px 10px">${esc(CLOUD.user.email||'')}</div><button class="mitem" data-act="cloud-out">Se déconnecter</button>`:`<a href="#avancement">Se connecter à l'espace en ligne</a>`):''}<div class="menu-sep"></div>${cloudOn()?`<button class="mitem" data-act="pj-files">Fichiers InDesign des projets</button>`:''}<a href="indesign/moodbook.ccx" download>Télécharger le panneau InDesign</a><div class="menu-sep"></div><button class="mitem" data-act="backup">Sauvegarder dans un fichier (.json)</button><button class="mitem" data-act="restore">Restaurer une sauvegarde…</button></div>`:''}</span>`};
+    ${view.menu?`<div class="menu panel">${years.map(y=>`<div class="menu-y">${y||'Sans année'}</div>${all.filter(x=>(+x.year||0)===y).sort((a,z)=>(a.order??999)-(z.order??999)||a.title.localeCompare(z.title)).map(x=>`<a href="#livre-${esc(x.id)}" ${b&&x.id===b.id?'aria-current="page"':''}>${esc(x.title)}</a>`).join('')}`).join('')}<div class="menu-sep"></div><a href="#avancement">Avancement de tous les livres</a><div class="menu-sep"></div>${cloudConfigured()?(CLOUD.user?`<div class="menu-y">En ligne</div><div class="small muted" style="padding:2px 10px">${esc(CLOUD.user.email||'')}</div><button class="mitem" data-act="my-pass">Changer mon mot de passe</button>${IS_ADMIN()?`<button class="mitem" data-act="accounts">Comptes des utilisateurs</button>`:''}<button class="mitem" data-act="cloud-out">Se déconnecter</button>`:`<a href="#avancement">Se connecter à l'espace en ligne</a>`):''}<div class="menu-sep"></div>${cloudOn()?`<button class="mitem" data-act="pj-files">Fichiers InDesign des projets</button>`:''}<a href="indesign/moodbook.ccx" download>Télécharger le panneau InDesign</a><div class="menu-sep"></div><button class="mitem" data-act="backup">Sauvegarder dans un fichier (.json)</button><button class="mitem" data-act="restore">Restaurer une sauvegarde…</button></div>`:''}</span>`};
 }
 const headerH=()=>(document.querySelector('.top')?.offsetHeight||52);
 // Brings a full-height view (Visuel, Rédaction) right under the sticky section tabs
@@ -736,7 +783,7 @@ function renderBook(b){
       </div>
       <div class="bh-act">
         <div class="row" style="gap:6px;justify-content:flex-end">${inCreation(b)?'<span class="sync-chip" title="Les photos et les textes se synchronisent avec le panneau moodbook d\'InDesign">⇄ Synchronisé avec InDesign</span>':''}<button class="btn ${inCreation(b)?'':'primary'}" data-act="export-indd" ${m.placed||m.texts?'':'disabled'} title="${m.placed||m.texts?'Script InDesign : photos placées et textes rédigés':'Placez des photos ou rédigez des textes pour activer l\'export'}">Export InDesign</button><button class="btn" data-act="export-csv" ${m.placed?'':'disabled'}>CSV</button></div>
-        <div class="row" style="gap:6px;justify-content:flex-end">${IS_ADMIN&&inCreation(b)?`<button class="btn ghost sm" data-act="diag" title="Télécharge les données de création de ce livre (structure, blocs, aperçus) pour le débogage">Diagnostic</button>`:''}${cloudOn()&&!isShared(b)?`<button class="btn ghost sm" data-act="share">Partager</button>`:''}${isShared(b)?'':`<button class="btn ghost sm danger ${view.armed==='book'?'armed':''}" data-act="del-book">${view.armed==='book'?'Confirmer la suppression':'Supprimer le livre'}</button>`}</div>
+        <div class="row" style="gap:6px;justify-content:flex-end">${IS_ADMIN()&&inCreation(b)?`<button class="btn ghost sm" data-act="diag" title="Télécharge les données de création de ce livre (structure, blocs, aperçus) pour le débogage">Diagnostic</button>`:''}${cloudOn()&&!isShared(b)?`<button class="btn ghost sm" data-act="share">Partager</button>`:''}${isShared(b)?'':`<button class="btn ghost sm danger ${view.armed==='book'?'armed':''}" data-act="del-book">${view.armed==='book'?'Confirmer la suppression':'Supprimer le livre'}</button>`}</div>
       </div>
     </header>
     <div id="presence-slot" class="presence">${inCreation(b)?presenceHtml():''}</div>
@@ -1426,7 +1473,7 @@ document.addEventListener('focusout',e=>{if(e.target&&e.target.id==='red-ed'){co
    La structure (pages, blocs, styles) vient du panneau InDesign (table creations). Chaque bloc photo et chaque texte
    est un enregistrement (table blocks) avec une version et un verrou : le site et InDesign écrivent bloc par bloc,
    jamais le livre entier, et une écriture sur une version périmée ou un bloc verrouillé est refusée. */
-const MB_VERSION='202610231613';
+const MB_VERSION='202610231804';
 const IS_ADMIN=()=>((CLOUD.user&&CLOUD.user.email)||'').toLowerCase()==='gardy.eugene@gmail.com';
 function fmtBuild(v){const m=String(v).match(/^(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)/);return m?`${m[3]}/${m[2]} ${m[4]}:${m[5]}`:v}
 function renderVersion(){const el=document.getElementById('ver-slot');if(!el)return;
@@ -1924,6 +1971,14 @@ document.addEventListener('click',async ev=>{
     case 'mep-settings':view.mepSettings=true;render();break;
     case 'legacy-del':{ev.preventDefault();if(view.armed!=='legacy'){arm('legacy');break}view.armed=null;remember(b);const n=b.layouts.length;b.layouts=[];b.spreads={};save(b);toastUndo(`${n} anciennes mises en page supprimées`);break}
     case 'share':openShare(b);break;
+    case 'accounts':openAccounts();break;
+    case 'my-pass':openMyPass();break;
+    case 'acct-gen':{const i=document.getElementById('ac-pass');view.accounts.draft.email=document.getElementById('ac-email').value;view.accounts.draft.password=genPass();renderAccounts();break}
+    case 'acct-copy':{try{await navigator.clipboard.writeText(view.accounts.shown.password);toast('Mot de passe copié')}catch(e){}break}
+    case 'acct-pass':{const pw=genPass();const r=await acctDo('password',t.dataset.id,{password:pw});if(r){const u=view.accounts.list.find(x=>x.id===t.dataset.id);view.accounts.shown={id:t.dataset.id,password:pw};view.accounts.msg=`Nouveau mot de passe pour ${esc(u?u.email:'')} : transmettez-le à la personne.`;renderAccounts()}break}
+    case 'acct-disable':acctDo('disable',t.dataset.id);break;
+    case 'acct-enable':acctDo('enable',t.dataset.id);break;
+    case 'acct-del':{const id=t.dataset.id;if(view.accounts.armed!==id){view.accounts.armed=id;renderAccounts();setTimeout(()=>{if(view.accounts&&view.accounts.armed===id){view.accounts.armed=null;renderAccounts()}},5000);break}view.accounts.armed=null;await acctDo('delete',id);break}
     case 'diag':{const c=crOf(b);if(!c)break;const imgs={};for(const pg of c.data.pages||[])if(pg.img&&captures[crImg(b,pg.img)])imgs[pg.img]=captures[crImg(b,pg.img)];
       const out={app:'moodbook-diagnostic',site:MB_VERSION,at:new Date().toISOString(),book:{id:b.id,title:b.title,pageCount:b.pageCount,photoRoot:b.photoRoot||'',folders:(b.photoFolders||[]).map(f=>f.name)},
         files:['mep','livre'].map(r=>pjDoc(b,r)).filter(Boolean).map(({open_req,open_for,...r})=>r),creation:c.data,
@@ -2232,8 +2287,8 @@ document.addEventListener('change',e=>{
 });
 document.addEventListener('submit',e=>{
   e.preventDefault();const f=e.target;const b=cur();
-  if(f.id==='cloud-login'){const email=document.getElementById('cl-email').value.trim(),pass=document.getElementById('cl-pass').value;view.cloudEmail=email;const m=(e.submitter&&e.submitter.dataset.mode)||'in';
-    if(!email||pass.length<6){view.cloudMsg='Indiquez votre e-mail et un mot de passe de 6 caractères minimum.';view.cloudErr=true;render();return}
+  if(f.id==='cloud-login'){const email=document.getElementById('cl-email').value.trim(),pass=document.getElementById('cl-pass').value;view.cloudEmail=email;const m='in';
+    if(!email||!pass){view.cloudMsg='Indiquez votre e-mail et votre mot de passe.';view.cloudErr=true;render();return}
     view.cloudMsg=m==='up'?'Création du compte…':'Connexion…';view.cloudErr=false;render();
     (async()=>{const r=m==='up'?await CLOUD.sb.auth.signUp({email,password:pass,options:{emailRedirectTo:location.href.split('#')[0]}}):await CLOUD.sb.auth.signInWithPassword({email,password:pass});
       if(r.error){view.cloudMsg=/invalid login/i.test(r.error.message)?'E-mail ou mot de passe incorrect.':/already registered/i.test(r.error.message)?'Ce compte existe déjà : utilisez « Se connecter ».':/confirm/i.test(r.error.message)?'Confirmez d\'abord votre adresse avec le lien reçu par e-mail.':r.error.message;view.cloudErr=true}
@@ -2241,6 +2296,12 @@ document.addEventListener('submit',e=>{
       else{view.cloudMsg='';view.cloudErr=false}render()})();return}
   if(f.id==='share-form'){const em=document.getElementById('share-email').value.trim().toLowerCase();if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){view.share.err='Adresse e-mail invalide.';renderShare();return}
     (async()=>{const {error}=await CLOUD.sb.from('book_shares').insert({book_id:view.share.book,email:em});if(error&&!/duplicate/i.test(error.message)){view.share.err="Invitation impossible : "+error.message}else{view.share.err='';view.share.list=[...(view.share.list||[]).filter(x=>x.email!==em),{email:em}]}renderShare()})();return}
+  if(f.id==='acct-form'){const v=view.accounts;if(!v)return;const email=document.getElementById('ac-email').value.trim().toLowerCase(),password=document.getElementById('ac-pass').value.trim();v.draft={email,password};
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){v.err='Adresse e-mail invalide.';renderAccounts();return}if(password.length<8){v.err='Mot de passe de 8 caractères minimum.';renderAccounts();return}
+    (async()=>{const r=await acctDo('create',null,{email,password});if(r&&r.user){view.accounts.shown={id:r.user.id,password};view.accounts.msg=`Compte créé pour <b>${esc(email)}</b>. Transmettez-lui son adresse et son mot de passe.`;view.accounts.draft={email:'',password:genPass()};renderAccounts()}})();return}
+  if(f.id==='mypass-form'){const v=view.myPass;const a=document.getElementById('mp-1').value,b2=document.getElementById('mp-2').value;
+    if(a.length<8){v.err='8 caractères minimum.';renderMyPass();return}if(a!==b2){v.err='Les deux mots de passe ne sont pas identiques.';renderMyPass();return}
+    (async()=>{const {error}=await CLOUD.sb.auth.updateUser({password:a});if(error){v.err=error.message}else{v.ok=true}renderMyPass()})();return}
   if(f.id==='rnote-form'){const b=cur();if(!b||!cloudOn())return;const i=document.getElementById('rn-text');const text=i.value.trim();if(!text){i.focus();return}
     const pg=parseInt(document.getElementById('rn-page').value,10);view.rnPage=pg;
     const row={owner:ownerOf(b),book_id:b.id,id:uid('t'),text,target:view.tdTarget||'site',page:pg>0?pg:null,by_name:myName(),created_at:new Date().toISOString()};

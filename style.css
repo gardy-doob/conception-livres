@@ -778,3 +778,13 @@ body.has-rbar .toast{bottom:calc(110px + env(safe-area-inset-bottom,0px))}
 .fr.tx.ghost .tmk,.fr.tx.ghost .tfb,.fr.tx.ghost .tfi{display:none}
 .fr.tx.ghost{color:transparent}
 .plv{overflow:hidden}
+.gate{min-height:calc(100vh - 160px);display:grid;place-items:center;padding:24px 0}
+.gatebox{display:grid;gap:12px;width:min(380px,100%);padding:22px}
+.gate-h{display:flex;align-items:center;gap:8px;font-size:18px}.gate-h .muted{font-size:13px}
+.gatebox label{display:grid;gap:4px;font-weight:500}
+body.gated .top .saved,body.gated .top [data-act="backup"],body.gated .top #ver-slot{display:none}
+.acct-new{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.acct-new #ac-email{flex:1 1 220px}.acct-pwin{display:flex;gap:4px;align-items:center}.acct-pwin input{width:180px}
+.acct-list{display:grid;gap:6px}.acct{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;border:1px solid var(--line);border-radius:8px;padding:8px 10px;flex-wrap:wrap}
+.acct.off{opacity:.65}.acct-n{display:grid;gap:2px;min-width:0}.acct-a{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+.acct-pw{font-size:13px;background:var(--ok-bg);border-radius:6px;padding:4px 8px;display:inline-flex;gap:6px;align-items:center}.acct-pw code{font-size:13px}
+.ok-msg{color:var(--ok)}
