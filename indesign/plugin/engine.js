@@ -63,6 +63,7 @@
     // place of the file on disk. A file found elsewhere than its recorded place is a copy (or a move) and waits for a choice.
     async activate(doc) {
       this.unbindLocal(); this.retryAt = 0;
+      if (this.dom.refreshKeys) await this.dom.refreshKeys(false);
       this.docKey = this.dom.docKey(doc);
       if (!this.me) { this.onChange(); return; }
       const lab = this.dom.readDocLabel(doc); const legacy = this.dom.readBinding(doc);
@@ -70,6 +71,8 @@
         if (lab && lab.uid) {
           const reg = (await this.api.docByUid(lab.uid))[0];
           if (!reg) { this.dom.clearBinding(doc); this.say('Le lien de ce fichier avec « ' + (lab.title || lab.book) + ' » a été supprimé (depuis le site ou un autre ordinateur).'); this.onChange(); return; }
+          const bogus = !reg.path || /object Promise/.test(reg.path);
+          if (bogus && !/^sans-titre:/.test(this.docKey)) { await this.linkDoc(doc, { owner: reg.owner, id: reg.book_id, title: lab.title || reg.book_id }, reg.role, false, {}); return; }
           if (reg.path !== this.docKey && !(reg.paths || []).includes(this.docKey)) {
             this.pending = { kind: 'copy', reg, title: lab.title || reg.book_id, role: reg.role };
             this.say('Ce fichier n\'est pas à l\'emplacement relié à « ' + (lab.title || reg.book_id) + ' » : synchronisation suspendue.'); this.onChange(); return;
@@ -83,6 +86,7 @@
         if (legacy) {
           // Link made by an earlier panel: kept as the book file when it is surely this file, otherwise confirmed by hand
           const book = { owner: legacy.owner, id: legacy.book, title: legacy.title };
+          if (legacy.path && /object Promise/.test(legacy.path)) legacy.path = '';   // written by an earlier panel: place unknown
           if (legacy.path && legacy.path === this.docKey) { await this.linkDoc(doc, book, 'livre', false, {}); return; }
           this.pending = { kind: legacy.path ? 'copy-old' : 'old', book, path: legacy.path || '', title: legacy.title || legacy.book, role: 'livre' };
           this.say((legacy.path ? 'Ce fichier n\'est pas celui relié à « ' : 'Lien à confirmer avec « ') + (legacy.title || legacy.book) + ' » : synchronisation suspendue.');
@@ -94,6 +98,7 @@
     // Link this file to a project with a role. opt.fresh: the comparison with the site starts again from scratch (corrective)
     async linkDoc(doc, book, role, force, opt) {
       opt = opt || {};
+      if (this.dom.refreshKeys) { await this.dom.refreshKeys(true); this.docKey = this.dom.docKey(doc); }
       const lab = this.dom.readDocLabel(doc); const uid = (lab && lab.uid) || this.newUid();
       const res = await this.api.rpc('doc_link', { p_owner: book.owner, p_book: book.id, p_role: role, p_uid: uid, p_path: this.docKey, p_name: this.dom.docName(doc), p_by: this.me.name, p_force: !!force });
       if (!res || !res.ok) { this.pending = { kind: (res && res.reason) || 'error', res: res || {}, book, role, fresh: !!opt.fresh, title: book.title }; this.onChange(); return res || { ok: false }; }
@@ -197,6 +202,7 @@
           const open = cands.map(p => this.dom.findOpenDoc(p)).find(Boolean);
           if (open) this.dom.bringToFront(open);
           else { let ok = false, last = null; for (const p of cands) { try { await this.dom.openDoc(p); ok = true; break; } catch (e) { last = e; } } if (!ok) throw last || new Error('fichier introuvable'); }
+          if (this.dom.refreshKeys) await this.dom.refreshKeys(false);
           if (r.open_mode === 'fix') {
             this.fixWanted.add(r.doc_uid);
             const d = this.dom.activeDoc();
@@ -295,6 +301,7 @@
     // ---------- going into Création: the document becomes the reference of the book ----------
     async startCreation(doc, book, progress) {
       progress = progress || (() => {});
+      if (this.dom.refreshKeys) await this.dom.refreshKeys(true);
       if (/^sans-titre:/.test(this.dom.docKey(doc))) throw new Error('Enregistrez d\'abord le document (Fichier › Enregistrer), puis recommencez.');
       this.docKey = this.dom.docKey(doc);
       if (!this.link || this.link.book !== book.id || this.link.owner !== book.owner || this.link.role !== 'livre') {
@@ -318,15 +325,20 @@
       const s = this.dom.readStructure(doc, this.book); const pagesSt = this.st.pages || (this.st.pages = {});
       const changed = s.pages.filter(pg => opt.force || !pagesSt[pg.n] || pagesSt[pg.n].sig !== pg.sig);
       const known = Object.keys(pagesSt).length;
-      if (!changed.length && known === s.pages.length) { s.pages.forEach(pg => pg.img = pagesSt[pg.n].img); return false; }
+      if (!changed.length && known === s.pages.length) { s.pages.forEach(pg => { pg.img = pagesSt[pg.n].img; pg.bg = pagesSt[pg.n].bg || ''; }); return false; }
       let i = 0;
       for (const pg of changed) {
         i++; if (opt.progress) opt.progress('Aperçu des pages ' + i + '/' + changed.length + '…');
-        try { const data = await this.dom.exportPreview(doc, pg); const key = 'p' + pg.n + '-' + pg.sig; await this.api.putImage(this.bind.owner, this.bind.book, key, data); pagesSt[pg.n] = { sig: pg.sig, img: key }; }
-        catch (e) { this.say('Aperçu de la page ' + pg.n + ' impossible : ' + e.message); pagesSt[pg.n] = { sig: pg.sig, img: (pagesSt[pg.n] || {}).img || '' }; }
+        try {
+          const key = 'p' + pg.n + '-' + pg.sig;
+          await this.api.putImage(this.bind.owner, this.bind.book, key, await this.dom.exportPreview(doc, pg, true));      // the page as printed
+          await this.api.putImage(this.bind.owner, this.bind.book, key + '-f', await this.dom.exportPreview(doc, pg, false)); // without its texts
+          pagesSt[pg.n] = { sig: pg.sig, img: key, bg: key + '-f' };
+        }
+        catch (e) { this.say('Aperçu de la page ' + pg.n + ' impossible : ' + e.message); const o = pagesSt[pg.n] || {}; pagesSt[pg.n] = { sig: pg.sig, img: o.img || '', bg: o.bg || '' }; }
       }
       for (const n of Object.keys(pagesSt)) if (!s.pages.some(pg => String(pg.n) === n)) delete pagesSt[n];
-      s.pages.forEach(pg => pg.img = (pagesSt[pg.n] || {}).img || '');
+      s.pages.forEach(pg => { pg.img = (pagesSt[pg.n] || {}).img || ''; pg.bg = (pagesSt[pg.n] || {}).bg || ''; });
       await this.api.saveCreation(this.bind.owner, this.bind.book, { doc: this.dom.docName(doc), at: this.now(), pages: s.pages, stories: s.stories });
       this.saveState();
       if (!opt.force) this.say('Structure du document mise à jour en ligne (' + changed.length + ' page(s)).');
@@ -392,6 +404,7 @@
     }
     async _tick() {
       const now = this.now();
+      if (this.dom.refreshKeys) { const all = now - (this.t.keys || 0) > 10000; if (all) this.t.keys = now; await this.dom.refreshKeys(all); }
       if (now - (this.t.req || 0) > 6000) { this.t.req = now; await this.handleOpenRequests(); }
       if (now - (this.t.panel || 0) > 20000) { this.t.panel = now; await this.panelBeat(); }
       const docs = this.dom.openDocKeys();

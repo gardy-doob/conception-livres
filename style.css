@@ -757,3 +757,14 @@ details.legacy>summary{cursor:pointer;font-weight:600;color:var(--muted);margin-
 .todo.done .td-in{text-decoration:line-through;color:var(--muted)}
 .todo .icon-btn.sm{font-size:11px;padding:3px 6px;width:auto;height:auto;white-space:nowrap}
 .linkish{border:0;background:none;padding:0;color:var(--accent);font:inherit;cursor:pointer;text-decoration:underline}
+.rmain{position:relative}
+.rmain .rstage{padding-bottom:62px}
+.rbar.dock{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);z-index:6;flex-wrap:nowrap;max-width:calc(100% - 24px);background:color-mix(in srgb,var(--surface) 92%,transparent);backdrop-filter:blur(6px);border:1px solid var(--line);border-radius:999px;padding:6px 10px;box-shadow:0 4px 18px rgba(0,0,0,.14);opacity:.22;transition:opacity .18s}
+.rbar.dock:hover,.rbar.dock:focus-within{opacity:1}
+.rbar.dock .f{max-width:260px}
+@media (hover:none){.rbar.dock{opacity:.85}}
+.rspread.single{background:transparent;box-shadow:none}.rspread.single .rpage:not(.blank){box-shadow:0 6px 24px rgba(0,0,0,.18)}
+.fr.tx .tmk{position:absolute;inset:0;overflow:hidden;pointer-events:none}.fr.tx .tmk img{position:absolute;max-width:none;display:block}
+.fr.tx .tfb{position:absolute;inset:0;pointer-events:none}
+.fr.tx.ghost .tmk,.fr.tx.ghost .tfb,.fr.tx.ghost .tfi{display:none}
+.fr.tx.ghost{color:transparent}

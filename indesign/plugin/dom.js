@@ -14,10 +14,33 @@
     const FRAMES = ['Rectangle', 'Polygon', 'Oval'];
     const TEXT_SEL = ['InsertionPoint', 'Character', 'Word', 'Text', 'Paragraph', 'TextStyleRange', 'Line', 'TextColumn'];
     const DECOR = /\.(ai|eps|pdf|svg|indd|idms)$/i;
+    // Fingerprint of a text as shown in the page preview: letters and digits only (same function on the site)
+    function thash(s) { const t = String(s || '').normalize('NFC').replace(/[^\p{L}\p{N}]+/gu, ''); return hash(t); }
     function hash(s) { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36); }
 
     // ---------- documents ----------
-    const docKey = d => safe(() => pathStr(d.fullName), '') || ('sans-titre:' + safe(() => d.name, '') + ':' + safe(() => d.id, ''));
+    // The place of a document on disk. In InDesign's UXP API « fullName » is a Promise: it is resolved by refreshKeys()
+    // (called at each tick of the panel) and kept here; never use String(promise) (« [object Promise] ») as a key.
+    const keyCache = new Map();
+    const isPromise = v => !!(v && typeof v.then === 'function');
+    const untitled = d => 'sans-titre:' + safe(() => d.name, '') + ':' + safe(() => d.id, '');
+    function docKey(d) {
+      const id = safe(() => d.id, null); if (id != null && keyCache.has(id)) return keyCache.get(id);
+      const v = safe(() => d.fullName, null); if (v && !isPromise(v)) { const k = pathStr(v); if (k && !/object Promise/.test(k)) return k; }
+      return untitled(d);
+    }
+    async function refreshKeys(all) {
+      const open = new Set();
+      for (const d of els(app.documents)) {
+        const id = safe(() => d.id, null); if (id == null) continue; open.add(id);
+        if (!all && keyCache.has(id)) continue;
+        let k = '';
+        try { let v = d.fullName; if (isPromise(v)) v = await v; k = pathStr(v); } catch (e) { k = ''; }
+        if (k && !/object Promise/.test(k)) keyCache.set(id, k); else keyCache.delete(id);   // never saved: « sans-titre »
+      }
+      for (const id of [...keyCache.keys()]) if (!open.has(id)) keyCache.delete(id);
+    }
+    function forgetKey(d) { const id = safe(() => d.id, null); if (id != null) keyCache.delete(id); }
     function activeDoc() { return safe(() => app.documents.length ? app.activeDocument : null, null); }
     function openDocKeys() { return els(app.documents).map(docKey); }
     const isModified = d => !!safe(() => d.modified, false);
@@ -58,6 +81,14 @@
 
     // ---------- what counts as a block ----------
     const onPage = it => !!safe(() => it.parentPage, null) && !eq(cn(safe(() => it.parentPage.parent, null)), 'MasterSpread');
+    // Not printed in InDesign = not on the site: hidden item, hidden or non-printing layer, « non imprimable » attribute
+    function shown(it) {
+      if (safe(() => it.visible, true) === false || safe(() => it.nonprinting, false) === true) return false;
+      const ly = safe(() => it.itemLayer, null); if (ly && (safe(() => ly.visible, true) === false || safe(() => ly.printable, true) === false)) return false;
+      let p = safe(() => it.parent, null);
+      for (let i = 0; p && i < 6 && cn(p) === 'Group'; i++) { if (safe(() => p.visible, true) === false || safe(() => p.nonprinting, false) === true) return false; p = safe(() => p.parent, null); }
+      return true;
+    }
     const anchored = it => eq(cn(safe(() => it.parent, null)), 'Character');
     function linkOf(fr) { return safe(() => { const g = els(fr.allGraphics)[0]; return g ? pathStr(g.itemLink.filePath) : ''; }, ''); }
     // Photo block or decoration? A choice made in the panel (« Sélection : décor / bloc photo ») always wins. Otherwise an
@@ -71,7 +102,7 @@
       return names.some(n => p.includes(n));
     }
     function isPhotoFrame(it) {
-      if (!FRAMES.includes(cn(it)) || anchored(it) || !onPage(it)) return false;
+      if (!FRAMES.includes(cn(it)) || anchored(it) || !onPage(it) || !shown(it)) return false;
       if (safe(() => it.extractLabel('mb-photo'), '')) return true;
       if (safe(() => it.extractLabel('mb-decor'), '')) return false;
       const ln = linkOf(it);
@@ -89,7 +120,7 @@
     }
     function storyOnlyGraphic(st) { return safe(() => els(st.allGraphics).length > 0 && String(st.contents).replace(/[\s\uFFFC]/g, '') === '', false); }
     function storyPage(st) {
-      for (const tf of els(st.textContainers)) { if (anchored(tf)) return null; const pg = safe(() => tf.parentPage, null); if (pg && onPage(tf)) return safe(() => pg.documentOffset, 0) + 1; }
+      for (const tf of els(st.textContainers)) { if (anchored(tf)) return null; if (!shown(tf)) continue; const pg = safe(() => tf.parentPage, null); if (pg && onPage(tf)) return safe(() => pg.documentOffset, 0) + 1; }
       return null;
     }
     // Photo path as the site stores it: relative to the book folder (or « @dossier/… »), otherwise absolute
@@ -117,8 +148,16 @@
         let al = '';
         if (!eq(just, sj)) { if (eq(just, E.Justification.LEFT_ALIGN)) al = 'l'; else if (eq(just, E.Justification.RIGHT_ALIGN)) al = 'r'; }
         const runs = [];
-        for (const r of els(para.textStyleRanges)) {
-          let t = String(safe(() => r.contents, '') || '').replace(/\r$/, '').replace(/\u2028/g, '\n').replace(/[\uFEFF\uFFFC]/g, '');
+        const pt = String(safe(() => para.contents, '') || ''); const pIdx = safe(() => para.index, null);
+        const rs = els(para.textStyleRanges).map(r => ({ r, t: String(safe(() => r.contents, '') || ''), i: safe(() => r.index, null) }));
+        let off = 0;
+        if (rs.length && typeof pIdx === 'number' && typeof rs[0].i === 'number') off = pIdx - rs[0].i;
+        else { const J = rs.map(x => x.t).join(''); off = Math.max(0, J.indexOf(pt)); }
+        let pos = 0;
+        for (const x of rs) {
+          const r = x.r, a = pos, z = pos + x.t.length; pos = z;
+          const sub = x.t.slice(Math.max(0, off - a), Math.max(0, Math.min(x.t.length, off + pt.length - a)));
+          let t = sub.replace(/\r$/, '').replace(/\r/g, '').replace(/\u2028/g, '\n').replace(/[\uFEFF\uFFFC]/g, '');
           if (!t) continue;
           const b = BOLD.test(String(safe(() => r.fontStyle, ''))) && !baseBold;
           const c = safe(() => eq(r.capitalization, E.Capitalization.ALL_CAPS), false) && !baseCaps;
@@ -259,13 +298,14 @@
     function readStructure(d, book) {
       if (book) curBook = book;
       const k = unitFactor(d), pages = [], storiesOut = {};
-      const okStories = new Set(stories(d).map(st => st.id));
+      const okList = stories(d); const okStories = new Set(okList.map(st => st.id));
+      const textOf = new Map(); const storyText = sid => { if (!textOf.has(sid)) { const st = okList.find(x => String(x.id) === String(sid)); textOf.set(sid, st ? String(safe(() => st.contents, '') || '') : ''); } return textOf.get(sid); };
       for (const sp of allSpreads(d)) {
         const pgs = els(sp.pages); const pb = pgs.map(box); const items = els(sp.allPageItems); const N = items.length;
         const per = pgs.map(() => []);
         items.forEach((it, idx) => {
           const kind = isPhotoFrame(it) ? 'ph' : (cn(it) === 'TextFrame' && !anchored(it) && okStories.has(safe(() => it.parentStory.id, -1))) ? 'tx' : null;
-          if (!kind || safe(() => it.visible === false, false)) return;
+          if (!kind || !shown(it)) return;
           const b = box(it); let pi = -1;
           for (let q = 0; q < pb.length; q++) if (Math.min(b.x2, pb[q].x2) - Math.max(b.x1, pb[q].x1) > .5 && Math.min(b.y2, pb[q].y2) - Math.max(b.y1, pb[q].y1) > .5) { pi = q; break; } // straddling: left page
           if (pi < 0) return;
@@ -289,19 +329,21 @@
         pgs.forEach((pg, q) => {
           const n = safe(() => pg.documentOffset, 0) + 1; const P = pb[q];
           const side = pgs.length >= 2 ? (q === 0 ? 'l' : 'r') : (safe(() => eq(pg.side, E.PageSideOptions.LEFT_HAND), false) ? 'l' : 'r');
-          const frames = per[q]; const sig = hash(JSON.stringify(frames.map(f => [f.bid, f.x, f.y, f.w, f.h, f.z, f.sh || '', f.cols || ''])) + (P.x2 - P.x1) + 'x' + (P.y2 - P.y1));
-          pages.push({ n, name: safe(() => String(pg.name), String(n)), side, w: r2(P.x2 - P.x1), h: r2(P.y2 - P.y1), frames, sig });
+          const frames = per[q]; const th = {};
+          for (const f of frames) if (f.k === 'tx' && !(f.st in th)) th[f.st] = thash(storyText(f.st));
+          const sig = hash(JSON.stringify(frames.map(f => [f.bid, f.x, f.y, f.w, f.h, f.z, f.sh || '', f.cols || ''])) + JSON.stringify(th) + (P.x2 - P.x1) + 'x' + (P.y2 - P.y1));
+          pages.push({ n, name: safe(() => String(pg.name), String(n)), side, w: r2(P.x2 - P.x1), h: r2(P.y2 - P.y1), frames, sig, th });
         });
       }
       return { pages, stories: storiesOut };
     }
     // Page preview (photos and decoration, without the text frames that the site draws itself)
-    async function exportPreview(d, pg) {
+    async function exportPreview(d, pg, withText) {
       const page = d.pages.item(pg.n - 1); const hidden = [];
-      for (const it of els(page.allPageItems)) if (cn(it) === 'TextFrame' && safe(() => it.visible, false)) { safe(() => { it.visible = false; hidden.push(it); }); }
+      if (!withText) for (const it of els(page.allPageItems)) if (cn(it) === 'TextFrame' && safe(() => it.visible, false)) { safe(() => { it.visible = false; hidden.push(it); }); }
       const jp = app.jpegExportPreferences; const keys = ['exportingSpread', 'jpegExportRange', 'pageString', 'jpegQuality', 'exportResolution', 'jpegColorSpace', 'antiAlias']; const saved = {};
       keys.forEach(k => { saved[k] = safe(() => jp[k], undefined); });
-      const lfs = uxp.storage.localFileSystem; const tmp = await lfs.getTemporaryFolder(); const name = 'mb-page-' + pg.n + '.jpg';
+      const lfs = uxp.storage.localFileSystem; const tmp = await lfs.getTemporaryFolder(); const name = 'mb-page-' + pg.n + (withText ? '' : '-fond') + '.jpg';
       try {
         jp.exportingSpread = false; jp.jpegExportRange = E.ExportRangeOrAllPages.EXPORT_RANGE; jp.pageString = '+' + pg.n;
         safe(() => { jp.jpegQuality = E.JPEGOptionsQuality.MEDIUM; }); safe(() => { jp.exportResolution = 60; }); safe(() => { jp.jpegColorSpace = E.JpegColorSpaceEnum.RGB; }); safe(() => { jp.antiAlias = true; });
@@ -319,7 +361,7 @@
       if (i < u8.length) { const n = (u8[i] << 16) | ((i + 1 < u8.length ? u8[i + 1] : 0) << 8); s += A[n >> 18 & 63] + A[n >> 12 & 63] + (i + 1 < u8.length ? A[n >> 6 & 63] : '=') + '='; }
       return s;
     }
-    return { activeDoc, openDocKeys, docKey, isModified, docName, readBinding, writeBinding, clearBinding, readDocLabel, writeDocLabel, clearLegacy, findOpenDoc, bringToFront, openDoc, toggleKind, activePage, readBlocks, writeBlock, selectionBid, readStructure, exportPreview, relPath, b64 };
+    return { activeDoc, openDocKeys, docKey, refreshKeys, forgetKey, thash, isModified, docName, readBinding, writeBinding, clearBinding, readDocLabel, writeDocLabel, clearLegacy, findOpenDoc, bringToFront, openDoc, toggleKind, activePage, readBlocks, writeBlock, selectionBid, readStructure, exportPreview, relPath, b64 };
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = { makeDom }; else root.MBDom = { makeDom };
 })(typeof window !== 'undefined' ? window : globalThis);

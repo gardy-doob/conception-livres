@@ -1273,10 +1273,14 @@ function flowStory(s,content,els){
     box.innerHTML=sliceHtml(F,content,styles,W,start,lo,!content.user);start=lo}
   const ovs=start<total;if(ovs&&els.length)els[els.length-1].insertAdjacentHTML('beforeend','<span class="badge-ovs" title="Texte en excès : il ne tient pas dans le bloc">+</span>');
   return ovs}
+// Fingerprint of a text (letters and digits only): the same function in the InDesign panel marks the texts of each page preview
+function thash(str){const t=String(str||'').normalize('NFC').replace(/[^\p{L}\p{N}]+/gu,'');let h=5381;for(let i=0;i<t.length;i++)h=((h<<5)+h+t.charCodeAt(i))|0;return (h>>>0).toString(36)}
+function storyFresh(b,s){const h=thash(storyContent(b,s).paras.map(plainOf).join('\n'));return s.frames.every(x=>x.l&&x.l.th&&x.l.th[x.f.st]===h)}
 function flowAll(only){
   const b=cur();if(!b||view.tab!=='redac')return;
   for(const s of spreadStories(b,view.rk)){if(only&&s.tkey!==only)continue;
     const els=[...document.querySelectorAll('.fr.tx[data-tk]')].filter(el=>el.dataset.tk===s.tkey).sort((a,z)=>a.dataset.ci-z.dataset.ci);
+    if(els.length&&els[0].classList.contains('pv')){const fresh=storyFresh(b,s);els.forEach(e=>e.classList.toggle('ghost',fresh));if(fresh){els.forEach(e=>{const c=e.querySelector('.tfc');if(c)c.innerHTML='';e.querySelector('.badge-ovs')?.remove()});view.ovs=view.ovs||{};view.ovs[s.tkey]=false;continue}}
     if(els.length){const o=flowStory(s,storyContent(b,s),els);view.ovs=view.ovs||{};view.ovs[s.tkey]=o;const w=document.getElementById('ovs-warn');if(w&&view.rsel===s.tkey)w.hidden=!o}}
 }
 function rPage(b,key,p,side,l,stories){
@@ -1288,10 +1292,12 @@ function rPage(b,key,p,side,l,stories){
     const ins=f.ins||[0,0,0,0];const pad=`padding:${cq(ins[0],W)} ${cq(ins[3],W)} ${cq(ins[2],W)} ${cq(ins[1],W)};`;
     const cols=(f.cols||1)>1?`column-count:${f.cols};column-gap:${cq(f.gut||12,W)};`:'';const vj=(f.cols||1)===1&&f.vj&&f.vj!=='t'?{c:'safe center',b:'safe flex-end',j:'space-between'}[f.vj]:'';
     const bg=f.bg?`background:${cssColor(f.bg)};`:'';const sk=f.sk?`box-shadow:inset 0 0 0 ${cq(f.sk.w,W)} ${cssColor(f.sk.c)};`:'';
+    const full=!!(l.cr&&l.th&&l.bg);const ghost=full&&storyFresh(b,s);
+    const mask=full?`<div class="tmk"><img src="${esc(imgSrc(l.bg))}" alt="" style="left:${(-f.x/f.w*100).toFixed(3)}%;top:${(-f.y/f.h*100).toFixed(3)}%;width:${(100/f.w).toFixed(3)}%;height:${(100/f.h).toFixed(3)}%"></div>`:'';
     const n=(s.story&&s.story.n)||s.frames.length;const st=textState(b.texts[s.tkey]);
     const crr2=b&&inCreation(b)?crOf(b):null;const lr=crr2&&crr2.rows.get('s'+String(s.tkey).split('#')[1]);const lko=lockedByOther(lr);
-    return `<div class="fr tx ${view.rsel===s.tkey?'sel':''} ${lko?'locked':''}" ${lko?`data-lockby="${esc(lockWho(lr))}"`:''} data-act="rsel" data-tk="${esc(s.tkey)}" data-ci="${f.ci||0}" style="${frStyle(f)}${bg}${sk}" title="Clic : rédiger ce texte"><div class="tfi" style="${pad}"><div class="tfc ${vj?'vj':''}" style="${cols}${vj?`justify-content:${vj};`:''}"></div></div>${n>1?`<span class="chain" title="Texte chaîné">${(f.ci||0)+1}/${n}</span>`:''}${head&&st?`<span class="badge-st ${st}" title="${st==='done'?(b.texts[s.tkey]&&b.texts[s.tkey].at?'Terminé et relu':'Terminé'):st==='q'?'Relu : questions en attente':'En cours de rédaction'}">${st==='done'?'✓':st==='q'?'?':'✎'}</span>`:''}</div>`}).join('');
-  const bgSrc=imgSrc(l.bg||l.img);
+    return `<div class="fr tx ${full?'pv':''} ${ghost?'ghost':''} ${view.rsel===s.tkey?'sel':''} ${lko?'locked':''}" ${lko?`data-lockby="${esc(lockWho(lr))}"`:''} data-act="rsel" data-tk="${esc(s.tkey)}" data-ci="${f.ci||0}" style="${frStyle(f)}${full?'':bg+sk}" title="Clic : rédiger ce texte">${mask}${full&&(bg||sk)?`<div class="tfb" style="${bg}${sk}"></div>`:''}<div class="tfi" style="${pad}"><div class="tfc ${vj?'vj':''}" style="${cols}${vj?`justify-content:${vj};`:''}"></div></div>${n>1?`<span class="chain" title="Texte chaîné">${(f.ci||0)+1}/${n}</span>`:''}${head&&st?`<span class="badge-st ${st}" title="${st==='done'?(b.texts[s.tkey]&&b.texts[s.tkey].at?'Terminé et relu':'Terminé'):st==='q'?'Relu : questions en attente':'En cours de rédaction'}">${st==='done'?'✓':st==='q'?'?':'✎'}</span>`:''}</div>`}).join('');
+  const bgSrc=l.cr&&l.th&&l.bg?imgSrc(l.img):imgSrc(l.bg||l.img);
   return `<div class="rpage ${side}" lang="fr" style="aspect-ratio:${l.w}/${l.h}">${bgSrc?`<img class="plv-bg" src="${esc(bgSrc)}" alt="">`:''}${ph}${tx}</div>`;
 }
 const I_AL_L='<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2 3h12M2 6.3h8M2 9.6h12M2 13h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
@@ -1369,12 +1375,12 @@ function renderRedac(b,m,ev){
   const L=s.l?plm[b.pageLay[s.l]]:null,R=s.r?plm[b.pageLay[s.r]]:null;const ref=L||R||b.pl[0];const ratio=(2*ref.w/ref.h).toFixed(4);
   const all=allStories(b);const done=all.filter(x=>textState(b.texts[x.tkey])==='done').length;
   const opts=sp.map(x=>{const n=spreadStories(b,x.key).length;return `<option value="${x.key}" ${x.key===key?'selected':''}>${esc(spreadLabel(b,x.key))}${n?` · ${n} texte${n>1?'s':''}`:''}</option>`}).join('');
-  const bar=`<div class="rbar"><button class="btn sm" data-act="rk-step" data-d="-1" aria-label="Planche précédente">‹</button><select class="f sm" id="rk-sel" data-act="rk-sel" aria-label="Planche" style="max-width:340px">${opts}</select><button class="btn sm" data-act="rk-step" data-d="1" aria-label="Planche suivante">›</button>
+  const bar=`<div class="rbar dock"><button class="btn sm" data-act="rk-step" data-d="-1" aria-label="Planche précédente">‹</button><select class="f sm" id="rk-sel" data-act="rk-sel" aria-label="Planche" style="max-width:340px">${opts}</select><button class="btn sm" data-act="rk-step" data-d="1" aria-label="Planche suivante">›</button>
     <span class="small muted"><b class="mono">${done}/${all.length}</b> textes terminés</span><span style="flex:1"></span>
     <button class="btn sm" data-act="r-fs">${view.rfs?'Quitter le plein écran':'Plein écran'}</button></div>`;
-  const stage=`<div class="rstage"><div class="rspread" style="width:min(100cqw,calc(100cqh * ${ratio}));aspect-ratio:${ratio}">${rPage(b,key,s.l,'left',L,stories)}${rPage(b,key,s.r,'right',R,stories)}</div></div>`;
+  const stage=`<div class="rstage"><div class="rspread ${!s.l||!s.r?'single':''}" style="width:min(100cqw,calc(100cqh * ${ratio}));aspect-ratio:${ratio}">${rPage(b,key,s.l,'left',L,stories)}${rPage(b,key,s.r,'right',R,stories)}</div></div>`;
   const pick=view.plpick!=null&&(view.plpick===s.l||view.plpick===s.r)?`<div style="position:relative">${plPicker(b,view.plpick)}</div>`:'';
-  return `<div class="redac ${view.rfs?'fs':''}" id="redac"><div class="rmain">${bar}${pick}${stage}</div>${redacPanel(b,stories.find(x=>x.tkey===view.rsel)||null,stories)}</div>`;
+  return `<div class="redac ${view.rfs?'fs':''}" id="redac"><div class="rmain">${pick}${stage}${bar}</div>${redacPanel(b,stories.find(x=>x.tkey===view.rsel)||null,stories)}</div>`;
 }
 const edState={t:null};
 function edRecord(b,tk,paras){let rec=b.texts[tk];if(!rec)rec=b.texts[tk]={paras:[],st:'draft'};if(!rec.st)rec.st='draft';rec.paras=paras;if(rec.st!=='draft'&&rec.st!=='checking'){rec.st='draft';rec.fx=[];rec.q=[];rec.err=''}return rec}
@@ -1421,7 +1427,7 @@ document.addEventListener('focusout',e=>{if(e.target&&e.target.id==='red-ed'){co
    La structure (pages, blocs, styles) vient du panneau InDesign (table creations). Chaque bloc photo et chaque texte
    est un enregistrement (table blocks) avec une version et un verrou : le site et InDesign écrivent bloc par bloc,
    jamais le livre entier, et une écriture sur une version périmée ou un bloc verrouillé est refusée. */
-const MB_VERSION='202610231432';
+const MB_VERSION='202610231509';
 const IS_ADMIN=()=>((CLOUD.user&&CLOUD.user.email)||'').toLowerCase()==='gardy.eugene@gmail.com';
 function fmtBuild(v){const m=String(v).match(/^(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)/);return m?`${m[3]}/${m[2]} ${m[4]}:${m[5]}`:v}
 function renderVersion(){const el=document.getElementById('ver-slot');if(!el)return;
@@ -1457,7 +1463,7 @@ function applyCreation(b){
   const tol=0.006;const ord=arr=>arr.slice().sort((a,z)=>Math.abs(a.y-z.y)>tol?a.y-z.y:a.x-z.x).forEach((f,j)=>f.o=j);
   b.pl=d.pages.map(pg=>{const frames=pg.frames.map(f=>Object.assign({},f,{id:f.k==='ph'?f.bid:'t'+f.fid}));ord(frames.filter(f=>f.k==='ph'));ord(frames.filter(f=>f.k==='tx'));
     const stories={};frames.forEach(f=>{if(f.k==='tx'&&d.stories&&d.stories[f.st])stories[f.st]=d.stories[f.st]});
-    return {id:'cr'+pg.n,src:'cr',cr:true,name:'p. '+(pg.name||pg.n),pname:pg.name,side:pg.side,w:pg.w,h:pg.h,frames,stories,img:pg.img?'cap:'+crImg(b,pg.img):'',ph:[],order:pg.n,locked:false}});
+    return {id:'cr'+pg.n,src:'cr',cr:true,name:'p. '+(pg.name||pg.n),pname:pg.name,side:pg.side,w:pg.w,h:pg.h,frames,stories,img:pg.img?'cap:'+crImg(b,pg.img):'',bg:pg.bg?'cap:'+crImg(b,pg.bg):'',th:pg.bg&&pg.th?pg.th:null,ph:[],order:pg.n,locked:false}});
   b.pageLay={};d.pages.forEach(pg=>b.pageLay[pg.n]='cr'+pg.n);
   const maxP=Math.max(...d.pages.map(p=>p.n));if(maxP>b.pageCount)b.pageCount=maxP;
   const assign={};for(const [k,arr] of Object.entries(b.assign||{})){const loose=arr.filter(a=>!a.f);if(loose.length)assign[k]=loose.slice()}
@@ -1557,7 +1563,7 @@ async function crTake(r){
   const b=books.get(r.book_id);if(!b)return;const old=CR.byBook.get(b.id);
   const c={owner:r.owner,data:r.data,rev:r.rev,rows:old?old.rows:new Map()};CR.byBook.set(b.id,c);
   if(!old){try{(await selectWhere('blocks','*',{owner:r.owner,book_id:r.book_id})).forEach(x=>c.rows.set(x.bid,x))}catch(e){}}
-  const need=(r.data.pages||[]).map(p=>p.img).filter(k=>k&&!captures[crImg(b,k)]);
+  const need=(r.data.pages||[]).flatMap(p=>[p.img,p.bg]).filter(k=>k&&!captures[crImg(b,k)]);
   if(need.length){try{(await selectWhere('creation_images','key,data',{owner:r.owner,book_id:r.book_id})).forEach(x=>{captures[crImg(b,x.key)]=x.data})}catch(e){}}
   applyCreation(b);baseline(b);
 }
