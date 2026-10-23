@@ -285,7 +285,7 @@
       const { bid } = blk;
       if (bid === this.selBid) return;               // the cursor is in this text: wait until it leaves it
       const prevBase = this.st.base[bid];
-      try { this.dom.writeBlock(doc, blk, row.data, this.book); }
+      try { await this.dom.writeBlock(doc, blk, row.data, this.book); }
       catch (e) { this.say('Impossible d\'appliquer ' + this.label(blk) + ' : ' + e.message); return; }
       // Remember the text as InDesign reads it back (not as the site sent it)
       let dh = hash(blk.kind, row.data);
@@ -449,7 +449,7 @@
         await this.push(c.blk, row, this.dom.isModified(doc), h);
       } else if (how === 'both' && c.blk.kind === 'tx') {
         const merged = { paras: [...((row && row.data && row.data.paras) || []), ...(c.blk.data.paras || [])] };
-        this.selBid = null; this.dom.writeBlock(doc, c.blk, merged, this.book);
+        this.selBid = null; await this.dom.writeBlock(doc, c.blk, merged, this.book);
         const back = this.dom.readBlocks(doc, { only: [bid], cache: this.textCache, root: this.book })[0] || Object.assign({}, c.blk, { data: merged });
         this.st.base[bid] = { dh: '', rev: row.rev };
         await this.push(back, row, true, hash('tx', back.data));

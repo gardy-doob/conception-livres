@@ -234,7 +234,14 @@
       if (p.charAt(0) === '@') { const cut = p.indexOf('/'); const name = p.slice(1, cut); const base = folderAbs(d, name); return base ? base + '/' + p.slice(cut + 1) : null; }
       const base = book && book.root ? folderAbs(d, book.root) : null; return base ? base + '/' + p : null;
     }
-    function writeBlock(d, blk, data, book) {
+    // Placing a file: InDesign's UXP API wants a file entry (a plain path gives « Impossible de créer la ressource de lien à partir de l'URI donné »)
+    async function placeFile(fr, abs) {
+      const lfs = uxp.storage && uxp.storage.localFileSystem; let entry = null, lastErr = null;
+      if (lfs && lfs.getEntryWithUrl) for (const u of ['file:' + abs, 'file://' + encodeURI(abs), abs]) { try { entry = await lfs.getEntryWithUrl(u); if (entry) break; } catch (e) { lastErr = e; } }
+      if (entry) { try { fr.place(entry); return; } catch (e) { lastErr = e; } }
+      try { fr.place(abs); } catch (e) { throw new Error((lastErr && /not found|introuvable|exist/i.test(String(lastErr.message)) ? 'fichier introuvable : ' : '') + abs + ' (' + (e.message || e) + ')'); }
+    }
+    async function writeBlock(d, blk, data, book) {
       if (blk.kind === 'tx') {
         const st = d.stories.itemByID(+String(blk.bid).slice(1)); if (!safe(() => st.isValid, true)) throw new Error('texte introuvable');
         writeStory(st, (data && data.paras) || []); return;
@@ -242,7 +249,7 @@
       const fr = findFrame(d, +String(blk.bid).slice(1)); if (!fr) throw new Error('bloc photo introuvable');
       if (!data || !data.p) { for (const g of els(fr.allGraphics)) safe(() => g.remove()); return; }
       const abs = absPath(d, data.p, book); if (!abs) throw new Error('dossier photos introuvable pour « ' + data.p + ' »');
-      fr.place(abs);
+      await placeFile(fr, abs);
       safe(() => fr.fit(E.FitOptions.FILL_PROPORTIONALLY)); safe(() => fr.fit(E.FitOptions.CENTER_CONTENT));
     }
     function findFrame(d, id) { for (const sp of allSpreads(d)) for (const it of els(sp.allPageItems)) if (it.id === id) return it; return null; }
