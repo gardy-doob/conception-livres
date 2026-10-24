@@ -680,12 +680,14 @@ function render(){
   const nav=document.getElementById('nav');const b=view.route==='livre'?books.get(view.id):null;
   renderVersion();const nv=renderNav(b);nav.innerHTML=nv.links;document.getElementById('burger-slot').innerHTML=nv.burger;renderHistSlot();
   const app=document.getElementById('app');
+  {const R=document.getElementById('fx-text');if(R&&view.fxKeep==null)view.fxKeep=R.scrollTop}
   const keep={pb:document.getElementById('pb-scroll')?.scrollTop,ps:document.getElementById('ps-scroll')?.scrollTop,tr:document.getElementById('tray-list')?.scrollTop};
   if(view.route==='livre'){if(b)app.innerHTML=renderBook(normBook(b));else app.innerHTML=loaded?`<div class="panel emptystate"><h2>Livre introuvable</h2><p class="muted">Il a peut-être été supprimé.</p><a class="btn" href="#avancement">Retour à l'avancement</a></div>`:loadingState()}
   else app.innerHTML=renderProgress();
   for(const [id,k] of [['pb-scroll','pb'],['ps-scroll','ps'],['tray-list','tr']]){const el=document.getElementById(id);if(el&&keep[k]!=null)el.scrollTop=keep[k]}
   document.documentElement.style.setProperty('--toph',headerH()+'px');observeTiles();renderSelbar();renderPool();renderRbar();if(loaded)saveUI();maybeReopenDir();
   if(view.route==='livre'&&view.tab==='redac')flowAll();
+  if(view.route==='livre'&&view.tab==='redac'&&view.rfocus)fxBind();else view.fxKeep=null;
   crPresence();{const bb=view.route==='livre'?books.get(view.id):null;const want=bb&&inCreation(bb)&&view.tab==='redac'&&view.rsel?'s'+String(view.rsel).split('#')[1]:null;if(want!==CR.lockBid){if(want)crLock(bb,want);else crUnlock(bb||books.get(CR.lockBook))}CR.lockBook=bb&&bb.id}
   if(view.mepSettings){if(view.route==='livre'&&view.tab==='layouts'&&view._mepSet){const sc=document.querySelector('#overlay .modal')?.scrollTop;showModal(view._mepSet,'wide mepset');const md=document.querySelector('#overlay .modal');if(md&&sc)md.scrollTop=sc}else closeOverlay()}
   if(view.edit){const t=document.getElementById('pe-text');if(t&&document.activeElement!==t){t.focus();t.setSelectionRange(t.value.length,t.value.length)}}
@@ -708,10 +710,10 @@ const headerH=()=>(document.querySelector('.top')?.offsetHeight||52);
 // Brings a full-height view (Visuel, Rédaction) right under the sticky section tabs
 function scrollUnderTabs(id){const el=document.getElementById(id);if(!el)return;const t=document.querySelector('.tabs2');window.scrollTo(0,el.getBoundingClientRect().top+window.scrollY-headerH()-(t?t.offsetHeight:0)-6)}
 const UI_KEY='atelier-ui';
-function saveUI(){const u={hash:location.hash,tab:view.tab,cdfMode:view.cdfMode,active:view.active,rk:view.rk,pzh:view.pzh,plLines:!!view.plLines,lib:{sort:lib.sort,size:lib.size,sub:lib.sub,hideUsed:lib.hideUsed}};const j=JSON.stringify(u);try{sessionStorage.setItem(UI_KEY,j)}catch(e){}try{localStorage.setItem(UI_KEY,j)}catch(e){}}
+function saveUI(){const u={hash:location.hash,tab:view.tab,rfocus:!!view.rfocus,cdfMode:view.cdfMode,active:view.active,rk:view.rk,pzh:view.pzh,plLines:!!view.plLines,lib:{sort:lib.sort,size:lib.size,sub:lib.sub,hideUsed:lib.hideUsed}};const j=JSON.stringify(u);try{sessionStorage.setItem(UI_KEY,j)}catch(e){}try{localStorage.setItem(UI_KEY,j)}catch(e){}}
 function loadUI(){let u=null;try{u=JSON.parse(sessionStorage.getItem(UI_KEY)||'null')}catch(e){}if(!u)try{u=JSON.parse(localStorage.getItem(UI_KEY)||'null')}catch(e){}
   if(!u)return;if(u.tab)view.tab=u.tab==='events'?'cdf':u.tab;if(u.cdfMode)view.cdfMode=u.cdfMode;if(u.lib)Object.assign(lib,{sort:u.lib.sort||lib.sort,size:u.lib.size||lib.size,sub:u.lib.sub!==false,hideUsed:!!u.lib.hideUsed});
-  if(u.rk!=null)view.rk=u.rk;if(u.pzh)view.pzh=u.pzh;view.plLines=!!u.plLines;
+  if(u.rk!=null)view.rk=u.rk;view.rfocus=!!u.rfocus;if(u.pzh)view.pzh=u.pzh;view.plLines=!!u.plLines;
   if(!location.hash&&u.hash&&u.hash.startsWith('#livre-'))history.replaceState(null,'',u.hash);view._active=u.active}
 const loadingState=()=>`<div class="panel emptystate"><p class="muted">Chargement de vos livres…</p></div>`;
 function observeTiles(){
@@ -806,7 +808,7 @@ function renderBook(b){
   const tb=(id,tab,mode,label,count)=>`<button role="tab" aria-selected="${curTab===id}" data-act="tab" data-tab="${tab}" ${mode?`data-mode="${mode}"`:''}>${label}${count!==''&&count!=null?`<span class="count">${count}</span>`:''}</button>`;
   const tabs=`<nav class="tabs2" aria-label="Sections du livre">
       <div class="tgrp ${CRM0?'done':''}"><span class="tgl"><span class="tgn">${CRM0?'✓':'1'}</span>Conception<span class="tgd">${CRM0?'terminée':'structure du livre'}</span></span><div class="tabs" role="tablist">${tb('layouts','layouts','','Mises en page',m.nLay)}${tb('cdf','cdf','plan','Chemin de fer',m.sp.length+' pl.')}</div></div>
-      <div class="tgrp"><span class="tgl"><span class="tgn">2</span>Création<span class="tgd">${CRM0?'synchronisée avec InDesign':'photos et textes'}</span></span><div class="tabs" role="tablist">${tb('visuel','cdf','photos','Visuel',m.placed?m.placed+' ph.':'')}${tb('redac','redac','','Rédaction',m.texts||'')}${tb('notes','notes','','Notes',pjTodos(b).filter(t=>!t.done).length||'')}</div></div></nav>`;
+      <div class="tgrp"><span class="tgl"><span class="tgn">2</span>Création<span class="tgd">${CRM0?'synchronisée avec InDesign':'photos et textes'}</span></span><div class="tabs" role="tablist">${tb('visuel','cdf','photos','Visuel',m.placed?m.placed+' ph.':'')}${tb('redac','redac','','Rédaction',m.texts||'')}${tb('notes','notes','','Notes',pjTodos(b).filter(t=>!t.done).length||'')}</div></div>${view.tab==='redac'&&b.pl.length?`<button class="fx-sw" data-act="r-focus" aria-pressed="${!!view.rfocus}" title="Relire tout le livre d'un seul défilement"><span class="sw"><i></i></span>Focus</button>`:''}</nav>`;
   let body='';const CRM=inCreation(b);
   if(CRM&&(view.tab==='layouts'||(view.tab==='cdf'&&view.cdfMode!=='photos'))){const c=crOf(b);
     body=`<div class="panel emptystate"><h2>${I_LOCK} Conception terminée</h2><p class="muted">Ce livre est en création depuis le document InDesign « ${esc(c.data.doc||'')} »${c.data.at?' ('+esc(fmtVer(c.data.at))+')':''} : ses pages, ses blocs photo et ses blocs texte viennent maintenant du document, et se synchronisent avec InDesign.</p><div class="row" style="justify-content:center"><button class="btn primary" data-act="tab" data-tab="cdf" data-mode="photos">Aller au Visuel</button><button class="btn" data-act="tab" data-tab="redac">Aller à la Rédaction</button></div></div>`}
@@ -1423,6 +1425,7 @@ function redacPanel(b,s,stories){
   </aside>`;
 }
 function renderRedac(b,m,ev){
+  if(b.pl.length&&view.rfocus)return renderFocus(b,m);
   if(!b.pl.length)return `<div class="panel emptystate"><h2>Rédaction</h2><p class="muted">Importez d'abord les mises en page de votre fichier MEP (onglet Mises en page) et posez-les sur les pages : vous pourrez ensuite écrire directement dans leurs blocs texte.</p><button class="btn primary" data-act="tab" data-tab="layouts">Aller aux mises en page</button></div>`;
   const sp=m.sp;const withTx=sp.filter(s=>spreadStories(b,s.key).length);
   if(view.rk==null||!sp.some(s=>s.key===view.rk))view.rk=(withTx[0]||sp[0]).key;
@@ -1480,7 +1483,7 @@ document.addEventListener('focusout',e=>{if(e.target&&e.target.id==='red-ed'){co
    La structure (pages, blocs, styles) vient du panneau InDesign (table creations). Chaque bloc photo et chaque texte
    est un enregistrement (table blocks) avec une version et un verrou : le site et InDesign écrivent bloc par bloc,
    jamais le livre entier, et une écriture sur une version périmée ou un bloc verrouillé est refusée. */
-const MB_VERSION='202610240851';
+const MB_VERSION='202610240918';
 const IS_ADMIN=()=>((CLOUD.user&&CLOUD.user.email)||'').toLowerCase()==='gardy.eugene@gmail.com';
 function fmtBuild(v){const m=String(v).match(/^(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)/);return m?`${m[3]}/${m[2]} ${m[4]}:${m[5]}`:v}
 function renderVersion(){const el=document.getElementById('ver-slot');if(!el)return;
@@ -1639,6 +1642,60 @@ function crOnBlock(pl){
   const contentChanged=!prev||prev.rev!==r.rev;
   if(contentChanged&&!editing){applyCreation(b);baseline(b);if(IDB.ok)idbPut('book:'+b.id,clone(b)).catch(()=>{})}
   if(view.route==='livre'&&view.id===b.id)softRender();
+}
+
+/* ================= Rédaction · mode Focus (relecture de tout le livre d'un seul défilement) ================= */
+// Pages à gauche (40 % ; 20 % sur tablette ; bandeau de 30 % de haut sur téléphone), textes à droite, une planche après
+// l'autre : son titre, puis ses blocs reliés par une ligne. Les deux colonnes défilent ensemble.
+function fxHidden(b){try{return new Set(JSON.parse(localStorage.getItem('mb-fxhide-'+b.id)||'[]'))}catch(e){return new Set()}}
+function fxSetHidden(b,set){try{localStorage.setItem('mb-fxhide-'+b.id,JSON.stringify([...set]))}catch(e){}}
+function spreadTitle(b,k){const nm=b.spreadNames&&b.spreadNames[k];if(nm)return nm;const ev=evById(b);const ids=[...new Set(spreadPages(b,k).map(p=>b.pages[p]).filter(Boolean))];
+  return ids.map(id=>ev[id]&&String(ev[id].name||'').split('\n')[0]).filter(Boolean).join(' · ')}
+function renderFocus(b,m){
+  const plm=plById(b);const sp=m.sp;const hidden=fxHidden(b);
+  const groups=sp.map(x=>({x,stories:spreadStories(b,x.key)})).filter(g=>g.stories.length);
+  if(!groups.length)return `<div class="panel emptystate"><h2>Mode Focus</h2><p class="muted">Aucun bloc texte dans ce livre pour l'instant.</p></div>`;
+  const flat=groups.flatMap(g=>g.stories.filter(s=>!hidden.has(s.tkey)).map(s=>s.tkey));
+  const ai=flat.indexOf(view.rsel);const curPl=view.fxPl!=null?view.fxPl:(view.rk!=null?view.rk:groups[0].x.key);
+  const thumb=(p,side)=>{const l=p&&p<=b.pageCount?plm[b.pageLay[p]]:null;const src=l?imgSrc(l.img||l.bg):'';return `<span class="fxpg ${side} ${p&&p<=b.pageCount?'':'none'}">${src?`<img src="${esc(src)}" alt="" loading="lazy">`:''}</span>`};
+  const left=groups.map(g=>`<button class="fxsp ${g.x.key===curPl?'on':''}" data-sync="${g.x.key}" data-act="fx-go" data-k="${g.x.key}" aria-label="${esc(spreadLabel(b,g.x.key))}"><span class="fxsp-l">${esc(spreadLabel(b,g.x.key))}</span><span class="fxsp-p">${thumb(g.x.l,'l')}${thumb(g.x.r,'r')}</span></button>`).join('');
+  const right=groups.map((g,gi)=>{const title=spreadTitle(b,g.x.key);const gIdx=flat.indexOf(g.stories.find(s=>!hidden.has(s.tkey))?.tkey);
+    const on=g.x.key===curPl;const reached=ai>=0&&gIdx>=0&&gIdx<=ai;
+    const vis=g.stories.filter(s=>!hidden.has(s.tkey));
+    const cards=vis.map((s,i)=>{const idx=flat.indexOf(s.tkey),act=s.tkey===view.rsel,st=textState(b.texts[s.tkey]);const content=storyContent(b,s);const styles=(s.story&&s.story.paras)||[];
+      const last=gi===groups.length-1&&i===vis.length-1;const kind=(styles[0]&&styles[0].st)||'Texte';
+      const node=`<span class="fxline ${idx<ai?'on':''} ${last?'last':''}"></span><span class="fxnode ${act?'act':''} ${st==='done'?'done':''} ${idx<=ai?'on':''}"></span>`;
+      const tools=`<span class="fxtools"><button class="fxb" data-act="${act?'rt':'rsel'}" data-cmd="c" data-tk="${esc(s.tkey)}" title="Capitales">CAP</button><button class="fxb" data-act="${act?'rt':'rsel'}" data-cmd="b" data-tk="${esc(s.tkey)}" title="Gras"><b>Gras</b></button><button class="fxb ${st==='done'?'ok':''}" data-act="red-done" data-tk="${esc(s.tkey)}" title="Relecture de l'orthographe, de la conjugaison et de la ponctuation">${st==='done'?'Relu ✓':'Relire'}</button><button class="fxb ico" data-act="fx-hide" data-tk="${esc(s.tkey)}" title="Masquer ce bloc" aria-label="Masquer ce bloc"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8Z" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M2.5 13.5 13.5 2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button></span>`;
+      let body;
+      if(act){const full=redacPanel(b,s,g.stories);const ed=full.slice(full.indexOf('<div class="red-ed"'),full.indexOf('<p class="small err" id="ovs-warn"'));const after=full.slice(full.indexOf('<div class="row"><button class="btn primary" data-act="red-next"'),full.lastIndexOf('</aside>'));body=ed+after}
+      else body=`<div class="fxprev">${hasText(b.texts[s.tkey])?content.paras.map((p,j)=>`<p style="${edCss(styles[Math.min(j,styles.length-1)],p.al)}">${runsHtml(p.runs)||'&nbsp;'}</p>`).join(''):'<p class="muted small">Bloc vide : cliquez pour écrire.</p>'}</div>`;
+      return `<div class="fxrow">${node}<div class="fxcard ${act?'act':''}" ${act?'':`data-act="rsel" data-tk="${esc(s.tkey)}"`} id="fxc-${esc(s.tkey.replace(/[^\w-]/g,'_'))}"><div class="fxhead"><span class="small muted"><b>p. ${s.page}</b> · ${esc(kind)}</span>${tools}</div>${body}</div></div>`}).join('');
+    return `<section class="fxg" data-sync="${g.x.key}" id="fxg-${g.x.key}"><div class="fxrow">${`<span class="fxline ${reached?'on':''}"></span><span class="fxdot ${on||reached?'on':''}"></span>`}<div class="fxtitle ${on?'on':''}"><span>${esc(spreadLabel(b,g.x.key).split(' · ').slice(0,2).join(' · '))}</span>${title?`<b>${esc(title)}</b>`:''}</div></div>${cards}</section>`}).join('');
+  const hid=[...hidden].map(tk=>{const s=groups.flatMap(g=>g.stories).find(x=>x.tkey===tk);return s?`<button class="fxpill" data-act="fx-show" data-tk="${esc(tk)}" title="Réafficher ce bloc">p. ${s.page} ↺</button>`:''}).join('');
+  const all=allStories(b);const done=all.filter(x=>textState(b.texts[x.tkey])==='done').length;
+  return `<div class="redac fx" id="redac"><div class="fx-wrap"><div class="fx-pages" id="fx-pages">${left}</div>
+    <div class="fx-text" id="fx-text"><div class="fxbar"><b>Relecture</b><span class="small muted">${done}/${all.length} textes relus</span><span style="flex:1"></span>${hid?`<span class="small muted">Masqués :</span>${hid}`:''}</div>${right}</div></div></div>`;
+}
+// Synchronised scroll: a planche's position in one column maps to the same position in the other (proportionally)
+function fxSync(src,dst){
+  if(!src||!dst)return;const a=[...src.querySelectorAll('[data-sync]')],z=[...dst.querySelectorAll('[data-sync]')];if(!a.length||a.length!==z.length)return;
+  const H=el=>{const c=getComputedStyle(el);return /flex/.test(c.display)&&c.flexDirection==='row'};const hs=H(src),hd=H(dst);
+  // position of an element inside its scrolling column (independent of offsetParent and of the sticky bar)
+  const pos=(el,box,h)=>{const r=el.getBoundingClientRect(),q=box.getBoundingClientRect();return h?r.left-q.left+box.scrollLeft:r.top-q.top+box.scrollTop};
+  const scr=(box,h)=>h?box.scrollLeft:box.scrollTop;const max=(box,h)=>h?box.scrollWidth-box.clientWidth:box.scrollHeight-box.clientHeight;
+  const st=scr(src,hs);let i=0;while(i<a.length-1&&pos(a[i+1],src,hs)<=st+4)i++;
+  const a0=pos(a[i],src,hs),a1=i<a.length-1?pos(a[i+1],src,hs):max(src,hs);const f=a1>a0?Math.min(1,Math.max(0,(st-a0)/(a1-a0))):0;
+  const b0=pos(z[i],dst,hd),b1=i<z.length-1?pos(z[i+1],dst,hd):max(dst,hd);
+  fxSync.lock=dst;const v=b0+f*(b1-b0);if(hd)dst.scrollLeft=v;else dst.scrollTop=v;
+  const k=+a[i].dataset.sync;if(k!==view.fxPl){view.fxPl=k;view.rk=k;document.querySelectorAll('.fxsp').forEach(e=>e.classList.toggle('on',+e.dataset.k===k));document.querySelectorAll('.fxtitle').forEach(e=>e.classList.toggle('on',+e.closest('.fxg').dataset.sync===k));renderRbar()}
+}
+function fxBind(){
+  const L=document.getElementById('fx-pages'),R=document.getElementById('fx-text');if(!L||!R)return;
+  L.onscroll=()=>{if(fxSync.lock===L){fxSync.lock=null;return}fxSync(L,R)};R.onscroll=()=>{if(fxSync.lock===R){fxSync.lock=null;return}fxSync(R,L)};
+  if(view.fxKeep!=null){R.scrollTop=view.fxKeep;view.fxKeep=null;fxSync(R,L)}
+  if(view.fxGoto!=null){const g=document.getElementById('fxg-'+view.fxGoto);view.fxGoto=null;if(g){R.scrollTop=g.getBoundingClientRect().top-R.getBoundingClientRect().top+R.scrollTop-44;fxSync(R,L)}}
+  if(view.rsel&&view._fxSel!==view.rsel&&!view.fxShow)view.fxShow='fxc-'+view.rsel.replace(/[^\w-]/g,'_');view._fxSel=view.rsel;
+  if(view.fxShow){const c=document.getElementById(view.fxShow);view.fxShow=null;if(c){const r=c.getBoundingClientRect(),rr=R.getBoundingClientRect();if(r.top<rr.top+40||r.bottom>rr.bottom-20)R.scrollTop+=r.top-rr.top-80}}
 }
 /* ================= Projets : fichiers InDesign reliés (conception / livre), notes, synchronisation corrective ================= */
 // Un projet = un fichier de conception (« Mon projet - MEP ») + un fichier livre (« Mon projet »), reliés à la main depuis le
@@ -1991,6 +2048,10 @@ document.addEventListener('click',async ev=>{
     case 'mep-settings':view.mepSettings=true;render();break;
     case 'legacy-del':{ev.preventDefault();if(view.armed!=='legacy'){arm('legacy');break}view.armed=null;remember(b);const n=b.layouts.length;b.layouts=[];b.spreads={};save(b);toastUndo(`${n} anciennes mises en page supprimées`);break}
     case 'share':openShare(b);break;
+    case 'r-focus':view.rfocus=!view.rfocus;view.fxKeep=null;view.fxPl=null;if(view.rfocus){view.fxGoto=view.rk;if(view.rsel)view.fxShow='fxc-'+view.rsel.replace(/[^\w-]/g,'_')}render();if(!view.rfocus)scrollUnderTabs('redac');break;
+    case 'fx-go':{const k=+t.dataset.k;view.fxGoto=k;view.fxKeep=null;view.rk=k;render();break}
+    case 'fx-hide':{const set=fxHidden(b);set.add(t.dataset.tk);fxSetHidden(b,set);if(view.rsel===t.dataset.tk)view.rsel=null;render();toast('Bloc masqué dans le mode Focus');break}
+    case 'fx-show':{const set=fxHidden(b);set.delete(t.dataset.tk);fxSetHidden(b,set);render();break}
     case 'accounts':openAccounts();break;
     case 'my-pass':openMyPass();break;
     case 'acct-gen':{const i=document.getElementById('ac-pass');view.accounts.draft.email=document.getElementById('ac-email').value;view.accounts.draft.password=genPass();renderAccounts();break}
@@ -2032,9 +2093,9 @@ document.addEventListener('click',async ev=>{
     case 'mep-script':offerFile(MEP_SCRIPT_NAME,'\uFEFF'+MEP_JSX,MEP_JSX);break;
     case 'mep-force':{const pnd=view.mepPending;view.mepPending=null;closeOverlay();const bk=pnd&&books.get(pnd.book);if(bk)importMep(bk,pnd.files,true);break}
     case 'goto-page':{const p=+t.dataset.page;view.tab='cdf';view.cdfMode='plan';view.sel=new Set([p]);render();document.querySelector('.pg.sel')?.scrollIntoView({block:'center',behavior:'smooth'});break}
-    case 'rsel':{view.rsel=t.dataset.tk;view.plpick=null;render();setTimeout(()=>{const el=document.getElementById('red-ed');if(el&&el.isContentEditable){el.focus();const r=document.createRange();r.selectNodeContents(el);r.collapse(false);const sl=getSelection();sl.removeAllRanges();sl.addRange(r)}},0);break}
+    case 'rsel':{view.rsel=t.dataset.tk;view.plpick=null;if(view.rfocus){view.fxKeep=document.getElementById('fx-text')?.scrollTop??null;const sp=spreadStories(b,view.rk).some(x=>x.tkey===view.rsel)?null:allStories(b).find(x=>x.tkey===view.rsel);if(sp)view.rk=spreadKeyOf(sp.page)}render();setTimeout(()=>{const el=document.getElementById('red-ed');if(el&&el.isContentEditable){el.focus();const r=document.createRange();r.selectNodeContents(el);r.collapse(false);const sl=getSelection();sl.removeAllRanges();sl.addRange(r)}},0);break}
     case 'r-unsel':view.rsel=null;render();break;
-    case 'rk-step':{const sp=spreadsOf(b.pageCount);const i=sp.findIndex(x=>x.key===view.rk);const n=sp[Math.max(0,Math.min(sp.length-1,i+(+t.dataset.d)))];if(n){view.rk=n.key;view.rsel=null;view.plpick=null;render()}break}
+    case 'rk-step':{const sp=spreadsOf(b.pageCount);const i=sp.findIndex(x=>x.key===view.rk);const n=sp[Math.max(0,Math.min(sp.length-1,i+(+t.dataset.d)))];if(n){view.rk=n.key;view.rsel=null;view.plpick=null;if(view.rfocus){view.fxGoto=n.key;view.fxKeep=null}render()}break}
     case 'r-fs':{view.rfs=!view.rfs;render();try{if(view.rfs&&document.documentElement.requestFullscreen)document.documentElement.requestFullscreen().catch(()=>{});else if(!view.rfs&&document.fullscreenElement)document.exitFullscreen().catch(()=>{})}catch(e){}break}
     case 'rt':edCommand(t.dataset.cmd);break;
     case 'red-done':finishText(b.id,t.dataset.tk);break;
@@ -2289,7 +2350,7 @@ document.addEventListener('change',e=>{
     case 'ev-photos':{const x=b.events.find(e=>e.id===t.dataset.ev);x.photos=Math.max(0,parseInt(v)||0);save(b);break}
     case 'pl-name':{const x=b.pl.find(l=>l.id===t.dataset.pl);if(x&&v.trim()){x.name=v.trim();save(b)}break}
     case 'pl-lines':view.plLines=t.checked;render();break;
-    case 'rk-sel':view.rk=+v;view.rsel=null;view.plpick=null;render();break;
+    case 'rk-sel':view.rk=+v;view.rsel=null;view.plpick=null;if(view.rfocus){view.fxGoto=+v;view.fxKeep=null}render();break;
     case 'lay-name':{const x=b.layouts.find(l=>l.id===t.dataset.lay);if(v.trim()){x.name=v.trim();save(b)}break}
     case 'lay-fam':{const x=b.layouts.find(l=>l.id===t.dataset.lay);x.family=v;save(b);break}
     case 'lay-photos':{const x=b.layouts.find(l=>l.id===t.dataset.lay);x.photos=Math.max(0,parseInt(v)||0);save(b);break}
