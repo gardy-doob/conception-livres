@@ -704,7 +704,7 @@ function renderNav(b){
   const ver=IS_ADMIN()?`<div class="menu-sep"></div><div class="menu-y">Version</div><div class="menu-acc"><span class="mono small">v ${esc(fmtBuild(MB_VERSION))}</span></div><button class="mitem" data-act="load-latest">Charger la dernière version</button>`:'';
   return {links:`<a href="#avancement" ${view.route==='avancement'?'aria-current="page"':''}>Tableau de bord</a>${dd}`,burger:`
     <span class="burger"><button class="icon-btn" data-act="menu" aria-expanded="${!!view.menu}" aria-label="Menu" title="Menu"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
-    ${view.menu?`<div class="menu panel">${acc}${ver}<div class="menu-sep"></div><div class="menu-y">InDesign</div>${cloudOn()?`<button class="mitem" data-act="pj-files">Fichiers InDesign des projets</button>`:''}<a href="indesign/moodbook.ccx" download>Télécharger le panneau InDesign</a><div class="menu-sep"></div><div class="menu-y">Sauvegarde</div><button class="mitem" data-act="backup">Sauvegarder dans un fichier (.json)</button><button class="mitem" data-act="restore">Restaurer une sauvegarde…</button>${cloudConfigured()&&CLOUD.user?`<div class="menu-sep"></div><button class="mitem" data-act="cloud-out">Se déconnecter</button>`:''}</div>`:''}</span>`};
+    ${view.menu?`<div class="menu panel"><div class="m-only"><a href="#avancement" ${view.route==='avancement'?'aria-current="page"':''}>Tableau de bord</a>${years.map(y=>`<div class="menu-y">Livres ${y||'sans année'}</div>${all.filter(x=>(+x.year||0)===y).sort((a,z)=>(a.order??999)-(z.order??999)||a.title.localeCompare(z.title)).map(x=>`<a href="#livre-${esc(x.id)}" ${b&&x.id===b.id?'aria-current="page"':''}>${esc(x.title)}</a>`).join('')}`).join('')}<div class="menu-sep"></div></div>${acc}${ver}<div class="menu-sep"></div><div class="menu-y">InDesign</div>${cloudOn()?`<button class="mitem" data-act="pj-files">Fichiers InDesign des projets</button>`:''}<a href="indesign/moodbook.ccx" download>Télécharger le panneau InDesign</a><div class="menu-sep"></div><div class="menu-y">Sauvegarde</div><button class="mitem" data-act="backup">Sauvegarder dans un fichier (.json)</button><button class="mitem" data-act="restore">Restaurer une sauvegarde…</button>${cloudConfigured()&&CLOUD.user?`<div class="menu-sep"></div><button class="mitem" data-act="cloud-out">Se déconnecter</button>`:''}</div>`:''}</span>`};
 }
 const headerH=()=>(document.querySelector('.top')?.offsetHeight||52);
 // Brings a full-height view (Visuel, Rédaction) right under the sticky section tabs
@@ -1483,7 +1483,7 @@ document.addEventListener('focusout',e=>{if(e.target&&e.target.id==='red-ed'){co
    La structure (pages, blocs, styles) vient du panneau InDesign (table creations). Chaque bloc photo et chaque texte
    est un enregistrement (table blocks) avec une version et un verrou : le site et InDesign écrivent bloc par bloc,
    jamais le livre entier, et une écriture sur une version périmée ou un bloc verrouillé est refusée. */
-const MB_VERSION='202610240928';
+const MB_VERSION='202610240932';
 const IS_ADMIN=()=>((CLOUD.user&&CLOUD.user.email)||'').toLowerCase()==='gardy.eugene@gmail.com';
 function fmtBuild(v){const m=String(v).match(/^(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)/);return m?`${m[3]}/${m[2]} ${m[4]}:${m[5]}`:v}
 function renderVersion(){const el=document.getElementById('ver-slot');if(!el)return;
@@ -1703,6 +1703,7 @@ function fxFit(){
   rd.style.height=Math.max(320,window.innerHeight-rd.getBoundingClientRect().top-bh-10)+'px';
 }
 window.addEventListener('resize',()=>{if(document.querySelector('.redac.fx'))fxFit()});
+matchMedia('(max-width:700px)').addEventListener('change',()=>render());
 function fxBind(){
   const L=document.getElementById('fx-pages'),R=document.getElementById('fx-text');fxFit();if(!L||!R)return;
   // Without a mouse (phone, tablet), the block in the middle of the texts lights up as they scroll
@@ -1788,7 +1789,7 @@ function pjOpen(b,role,mode){return pjPatch(b,role,{open_req:new Date().toISOStr
 // Rédaction: bottom strip (like « Sans page ») with the planche navigation and the notes of the pages shown
 function renderRbar(){
   const el=document.getElementById('rbarslot');if(!el)return;const b=view.route==='livre'?books.get(view.id):null;
-  const on=!!(b&&view.tab==='redac'&&b.pl&&b.pl.length&&view.rk!=null);document.body.classList.toggle('has-rbar',on);
+  const on=!!(b&&view.tab==='redac'&&b.pl&&b.pl.length&&view.rk!=null)&&!(view.rfocus&&matchMedia('(max-width:700px)').matches);document.body.classList.toggle('has-rbar',on);
   if(!on){el.innerHTML='';return}
   const keepFocus=document.activeElement&&document.activeElement.id==='rn-text';
   const sp=spreadsOf(b.pageCount);const s=sp.find(x=>x.key===view.rk);if(!s){el.innerHTML='';return}

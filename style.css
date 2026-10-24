@@ -859,3 +859,5 @@ body.has-rbar .redac.fx{height:auto}
   .fx-pages>.fxsp{flex:0 0 46%}.fxsp-p{height:100%}.fxpg{aspect-ratio:auto;height:100%}
   .fx-text{flex:0 0 70%;min-height:0;padding:0 12px 30vh}}
 @media (max-width:700px){.rstrip{opacity:1}}
+.m-only{display:none}
+@media (max-width:700px){.top .wrap>#nav{display:none}.menu .m-only{display:grid;gap:1px}.menu{max-height:80vh}}
