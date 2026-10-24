@@ -1483,7 +1483,7 @@ document.addEventListener('focusout',e=>{if(e.target&&e.target.id==='red-ed'){co
    La structure (pages, blocs, styles) vient du panneau InDesign (table creations). Chaque bloc photo et chaque texte
    est un enregistrement (table blocks) avec une version et un verrou : le site et InDesign écrivent bloc par bloc,
    jamais le livre entier, et une écriture sur une version périmée ou un bloc verrouillé est refusée. */
-const MB_VERSION='202610240932';
+const MB_VERSION='202610240948';
 const IS_ADMIN=()=>((CLOUD.user&&CLOUD.user.email)||'').toLowerCase()==='gardy.eugene@gmail.com';
 function fmtBuild(v){const m=String(v).match(/^(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)/);return m?`${m[3]}/${m[2]} ${m[4]}:${m[5]}`:v}
 function renderVersion(){const el=document.getElementById('ver-slot');if(!el)return;
@@ -1657,7 +1657,8 @@ function renderFocus(b,m){
   if(!groups.length)return `<div class="panel emptystate"><h2>Mode Focus</h2><p class="muted">Aucun bloc texte dans ce livre pour l'instant.</p></div>`;
   const flat=groups.flatMap(g=>g.stories.filter(s=>!hidden.has(s.tkey)).map(s=>s.tkey));
   const ai=flat.indexOf(view.rsel);const curPl=view.fxPl!=null?view.fxPl:(view.rk!=null?view.rk:groups[0].x.key);
-  const thumb=(p,side)=>{const l=p&&p<=b.pageCount?plm[b.pageLay[p]]:null;const src=l?imgSrc(l.img||l.bg):'';return `<span class="fxpg ${side} ${p&&p<=b.pageCount?'':'none'}">${src?`<img src="${esc(src)}" alt="" loading="lazy">`:''}</span>`};
+  const ref=b.pl.find(l=>l.w&&l.h)||{w:3,h:4};
+  const thumb=(p,side)=>{const l=p&&p<=b.pageCount?plm[b.pageLay[p]]:null;const src=l?imgSrc(l.img||l.bg):'';const r=l&&l.w&&l.h?l:ref;return `<span class="fxpg ${side} ${p&&p<=b.pageCount?'':'none'}" style="aspect-ratio:${r.w}/${r.h}">${src?`<img src="${esc(src)}" alt="" loading="lazy">`:''}</span>`};
   const left=groups.map(g=>`<button class="fxsp ${g.x.key===curPl?'on':''}" data-sync="${g.x.key}" data-act="fx-go" data-k="${g.x.key}" aria-label="${esc(spreadLabel(b,g.x.key))}"><span class="fxsp-l">${esc(spreadLabel(b,g.x.key))}</span><span class="fxsp-p">${thumb(g.x.l,'l')}${thumb(g.x.r,'r')}</span></button>`).join('');
   const right=groups.map((g,gi)=>{const title=spreadTitle(b,g.x.key);const gIdx=flat.indexOf(g.stories.find(s=>!hidden.has(s.tkey))?.tkey);
     const on=g.x.key===curPl;const reached=ai>=0&&gIdx>=0&&gIdx<=ai;
@@ -1686,7 +1687,9 @@ function fxSync(src,dst){
   const st=scr(src,hs);let i=0;while(i<a.length-1&&pos(a[i+1],src,hs)<=st+4)i++;
   const a0=pos(a[i],src,hs),a1=i<a.length-1?pos(a[i+1],src,hs):max(src,hs);const f=a1>a0?Math.min(1,Math.max(0,(st-a0)/(a1-a0))):0;
   const b0=pos(z[i],dst,hd),b1=i<z.length-1?pos(z[i+1],dst,hd):max(dst,hd);
-  fxSync.lock=dst;const v=b0+f*(b1-b0);if(hd)dst.scrollLeft=v;else dst.scrollTop=v;
+  let v=b0+f*(b1-b0);
+  if(hd){const c=el=>pos(el,dst,true)+el.offsetWidth/2-dst.clientWidth/2;const c0=c(z[i]),c1=i<z.length-1?c(z[i+1]):c0;const g=f<.8?0:(f-.8)/.2;v=c0+g*(c1-c0)}
+  fxSync.lock=dst;if(hd)dst.scrollLeft=v;else dst.scrollTop=v;
   const k=+a[i].dataset.sync;if(k!==view.fxPl){view.fxPl=k;view.rk=k;document.querySelectorAll('.fxsp').forEach(e=>e.classList.toggle('on',+e.dataset.k===k));document.querySelectorAll('.fxtitle').forEach(e=>e.classList.toggle('on',+e.closest('.fxg').dataset.sync===k));renderRbar()}
 }
 // Phone: the whole interface stays still; only the texts scroll, and they drive the strip of pages sideways
@@ -1696,7 +1699,8 @@ function fxFit(){
   const rd=document.querySelector('.redac.fx');const on=!!rd;
   document.documentElement.classList.toggle('fx-lock',on);if(!on)return;
   const mob=matchMedia('(max-width:700px)').matches;const sb=document.querySelector('#rbarslot .pool');const bh=sb?sb.offsetHeight:0;
-  if(mob){rd.style.height='';rd.style.top=headerH()+'px';rd.style.bottom=bh+'px';return}
+  if(mob){rd.style.height='';if(window.scrollY){document.documentElement.classList.remove('fx-lock');window.scrollTo(0,0);document.documentElement.classList.add('fx-lock')}
+    const top=document.querySelector('.top');rd.style.top=(top?Math.max(0,top.getBoundingClientRect().bottom):headerH())+'px';rd.style.bottom=bh+'px';return}
   rd.style.top=rd.style.bottom='';
   const tabs=document.querySelector('.tabs2');const want=tabs?tabs.getBoundingClientRect().top+window.scrollY-headerH()-4:0;
   document.documentElement.classList.remove('fx-lock');window.scrollTo(0,Math.max(0,want));document.documentElement.classList.add('fx-lock');
