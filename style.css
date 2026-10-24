@@ -836,7 +836,7 @@ body.gated .top .saved,body.gated .top [data-act="backup"],body.gated .top #ver-
 .fxtitle.on{background:var(--accent);color:#fff}
 .fxtitle span{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.8}.fxtitle b{font-size:20px;font-weight:600}
 .fxcard{flex:1;min-width:0;margin-bottom:32px;padding:14px 16px 16px;border-radius:14px;border:1px solid var(--line);background:var(--surface);cursor:text;opacity:.55;filter:blur(1px);transition:opacity .25s,filter .25s,border-color .2s,box-shadow .2s}
-.fxcard:hover,.fxcard.act{opacity:1;filter:none}
+.fxcard:hover,.fxcard.act,.fxcard.lit{opacity:1;filter:none}
 .fxcard:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--line))}
 .fxcard.act{border:1.5px solid var(--accent);box-shadow:0 8px 24px rgba(176,39,92,.10);cursor:auto}
 .fxhead{display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap}.fxhead>.small{flex:1}
@@ -846,8 +846,14 @@ body.gated .top .saved,body.gated .top [data-act="backup"],body.gated .top #ver-
 .fxprev p{margin:0 0 .35em;line-height:1.5}
 .fxcard .red-ed{min-height:60px}
 @media (max-width:1100px){.fx-pages{flex-basis:20%;padding:10px;gap:14px}.fxsp-l{display:none}.fxsp{padding:6px}}
-@media (max-width:700px){.redac.fx{height:calc(100vh - var(--toph,52px) - 160px)}.fx-wrap{flex-direction:column;gap:10px}
-  .fx-pages{flex:0 0 30%;min-height:0;flex-direction:row;overflow-x:auto;overflow-y:hidden;gap:10px;padding:8px}
+html.fx-lock,html.fx-lock body{overflow:hidden;overscroll-behavior:none;height:100%}
+.fx-mhead{display:none}
+@media (max-width:700px){.redac.fx{position:fixed;left:0;right:0;z-index:15;background:var(--paper);padding:6px 12px 8px;display:flex;flex-direction:column;gap:6px;height:auto}
+  .fx-mhead{display:flex;align-items:center;gap:8px}.fx-mhead .fx-sw{margin-left:0}
+  .redac.fx .fx-wrap{flex:1;min-height:0}.redac.fx .fxbar{display:none}}
+@media (max-width:700px){.fx-wrap{flex-direction:column;gap:10px}
+  .fx-pages{flex:0 0 30%;min-height:0;flex-direction:row;overflow:hidden;gap:10px;padding:8px;pointer-events:auto}
+  .fx-text{overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
   .fx-pages>.fxsp{flex:0 0 46%}.fxsp-p{height:100%}.fxpg{aspect-ratio:auto;height:100%}
   .fx-text{flex:0 0 70%;min-height:0;padding:0 12px 30vh}}
-@media (hover:none){.fxcard{opacity:1;filter:none}}
+@media (max-width:700px){.rstrip{opacity:1}}

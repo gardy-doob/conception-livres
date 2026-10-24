@@ -687,7 +687,7 @@ function render(){
   for(const [id,k] of [['pb-scroll','pb'],['ps-scroll','ps'],['tray-list','tr']]){const el=document.getElementById(id);if(el&&keep[k]!=null)el.scrollTop=keep[k]}
   document.documentElement.style.setProperty('--toph',headerH()+'px');observeTiles();renderSelbar();renderPool();renderRbar();if(loaded)saveUI();maybeReopenDir();
   if(view.route==='livre'&&view.tab==='redac')flowAll();
-  if(view.route==='livre'&&view.tab==='redac'&&view.rfocus)fxBind();else view.fxKeep=null;
+  if(view.route==='livre'&&view.tab==='redac'&&view.rfocus)fxBind();else{view.fxKeep=null;document.documentElement.classList.remove('fx-lock')}
   crPresence();{const bb=view.route==='livre'?books.get(view.id):null;const want=bb&&inCreation(bb)&&view.tab==='redac'&&view.rsel?'s'+String(view.rsel).split('#')[1]:null;if(want!==CR.lockBid){if(want)crLock(bb,want);else crUnlock(bb||books.get(CR.lockBook))}CR.lockBook=bb&&bb.id}
   if(view.mepSettings){if(view.route==='livre'&&view.tab==='layouts'&&view._mepSet){const sc=document.querySelector('#overlay .modal')?.scrollTop;showModal(view._mepSet,'wide mepset');const md=document.querySelector('#overlay .modal');if(md&&sc)md.scrollTop=sc}else closeOverlay()}
   if(view.edit){const t=document.getElementById('pe-text');if(t&&document.activeElement!==t){t.focus();t.setSelectionRange(t.value.length,t.value.length)}}
@@ -1483,7 +1483,7 @@ document.addEventListener('focusout',e=>{if(e.target&&e.target.id==='red-ed'){co
    La structure (pages, blocs, styles) vient du panneau InDesign (table creations). Chaque bloc photo et chaque texte
    est un enregistrement (table blocks) avec une version et un verrou : le site et InDesign écrivent bloc par bloc,
    jamais le livre entier, et une écriture sur une version périmée ou un bloc verrouillé est refusée. */
-const MB_VERSION='202610240918';
+const MB_VERSION='202610240924';
 const IS_ADMIN=()=>((CLOUD.user&&CLOUD.user.email)||'').toLowerCase()==='gardy.eugene@gmail.com';
 function fmtBuild(v){const m=String(v).match(/^(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)/);return m?`${m[3]}/${m[2]} ${m[4]}:${m[5]}`:v}
 function renderVersion(){const el=document.getElementById('ver-slot');if(!el)return;
@@ -1673,7 +1673,7 @@ function renderFocus(b,m){
     return `<section class="fxg" data-sync="${g.x.key}" id="fxg-${g.x.key}"><div class="fxrow">${`<span class="fxline ${reached?'on':''}"></span><span class="fxdot ${on||reached?'on':''}"></span>`}<div class="fxtitle ${on?'on':''}"><span>${esc(spreadLabel(b,g.x.key).split(' · ').slice(0,2).join(' · '))}</span>${title?`<b>${esc(title)}</b>`:''}</div></div>${cards}</section>`}).join('');
   const hid=[...hidden].map(tk=>{const s=groups.flatMap(g=>g.stories).find(x=>x.tkey===tk);return s?`<button class="fxpill" data-act="fx-show" data-tk="${esc(tk)}" title="Réafficher ce bloc">p. ${s.page} ↺</button>`:''}).join('');
   const all=allStories(b);const done=all.filter(x=>textState(b.texts[x.tkey])==='done').length;
-  return `<div class="redac fx" id="redac"><div class="fx-wrap"><div class="fx-pages" id="fx-pages">${left}</div>
+  return `<div class="redac fx" id="redac"><div class="fx-mhead"><b>Relecture</b><span class="small muted">${done}/${all.length} relus</span><span style="flex:1"></span><button class="fx-sw" data-act="r-focus" aria-pressed="true"><span class="sw"><i></i></span>Focus</button></div><div class="fx-wrap"><div class="fx-pages" id="fx-pages">${left}</div>
     <div class="fx-text" id="fx-text"><div class="fxbar"><b>Relecture</b><span class="small muted">${done}/${all.length} textes relus</span><span style="flex:1"></span>${hid?`<span class="small muted">Masqués :</span>${hid}`:''}</div>${right}</div></div></div>`;
 }
 // Synchronised scroll: a planche's position in one column maps to the same position in the other (proportionally)
@@ -1689,9 +1689,21 @@ function fxSync(src,dst){
   fxSync.lock=dst;const v=b0+f*(b1-b0);if(hd)dst.scrollLeft=v;else dst.scrollTop=v;
   const k=+a[i].dataset.sync;if(k!==view.fxPl){view.fxPl=k;view.rk=k;document.querySelectorAll('.fxsp').forEach(e=>e.classList.toggle('on',+e.dataset.k===k));document.querySelectorAll('.fxtitle').forEach(e=>e.classList.toggle('on',+e.closest('.fxg').dataset.sync===k));renderRbar()}
 }
+// Phone: the whole interface stays still; only the texts scroll, and they drive the strip of pages sideways
+function fxFit(){
+  const rd=document.querySelector('.redac.fx');const mob=!!rd&&matchMedia('(max-width:700px)').matches;
+  document.documentElement.classList.toggle('fx-lock',mob);if(!rd)return;
+  if(!mob){rd.style.top=rd.style.bottom='';return}
+  const sb=document.querySelector('#rbarslot .pool');rd.style.top=headerH()+'px';rd.style.bottom=(sb?sb.offsetHeight:0)+'px';
+}
+window.addEventListener('resize',()=>{if(document.querySelector('.redac.fx'))fxFit()});
 function fxBind(){
-  const L=document.getElementById('fx-pages'),R=document.getElementById('fx-text');if(!L||!R)return;
-  L.onscroll=()=>{if(fxSync.lock===L){fxSync.lock=null;return}fxSync(L,R)};R.onscroll=()=>{if(fxSync.lock===R){fxSync.lock=null;return}fxSync(R,L)};
+  const L=document.getElementById('fx-pages'),R=document.getElementById('fx-text');fxFit();if(!L||!R)return;
+  // Without a mouse (phone, tablet), the block in the middle of the texts lights up as they scroll
+  const lit=()=>{if(!matchMedia('(hover: none), (max-width:700px)').matches)return;const q=R.getBoundingClientRect();const mid=q.top+q.height*.45;let best=null,bd=1e9;
+    R.querySelectorAll('.fxcard').forEach(c=>{const r=c.getBoundingClientRect();const d=r.top>mid?r.top-mid:r.bottom<mid?mid-r.bottom:0;if(d<bd){bd=d;best=c}});
+    R.querySelectorAll('.fxcard.lit').forEach(c=>{if(c!==best)c.classList.remove('lit')});if(best)best.classList.add('lit')};
+  L.onscroll=()=>{if(fxSync.lock===L){fxSync.lock=null;return}fxSync(L,R)};R.onscroll=()=>{lit();if(fxSync.lock===R){fxSync.lock=null;return}fxSync(R,L)};lit();
   if(view.fxKeep!=null){R.scrollTop=view.fxKeep;view.fxKeep=null;fxSync(R,L)}
   if(view.fxGoto!=null){const g=document.getElementById('fxg-'+view.fxGoto);view.fxGoto=null;if(g){R.scrollTop=g.getBoundingClientRect().top-R.getBoundingClientRect().top+R.scrollTop-44;fxSync(R,L)}}
   if(view.rsel&&view._fxSel!==view.rsel&&!view.fxShow)view.fxShow='fxc-'+view.rsel.replace(/[^\w-]/g,'_');view._fxSel=view.rsel;
