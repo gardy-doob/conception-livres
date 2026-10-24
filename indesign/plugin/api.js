@@ -31,6 +31,13 @@
         const rows = await raw('/rest/v1/books?select=id,user_id,title:data->>title,year:data->>year&order=updated_at.desc');
         return rows.map(r => ({ id: r.id, owner: r.user_id, title: r.title || r.id, year: r.year, shared: session && r.user_id !== session.user.id }));
       },
+      // A new book on the site (« Nouveau livre » from the panel): the same shape the site creates
+      async createBook(title, year, pageCount) {
+        const id = 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        const data = { title, year: +year || new Date().getFullYear(), pageCount: +pageCount || 0, events: [], pages: {}, layouts: [], pl: [], useTypes: false, order: 999, updatedAt: new Date().toISOString() };
+        await raw('/rest/v1/books', { method: 'POST', body: { id, data }, headers: { Prefer: 'return=minimal' } });
+        return { id, owner: session.user.id, title, year: data.year };
+      },
       async docByPath(path) { const a = await raw('/rest/v1/project_docs?select=*&path=eq.' + q(path)); return a.length ? a : raw('/rest/v1/project_docs?select=*&paths=cs.' + q(JSON.stringify([path]))); },
       async docByUid(uid) { return raw('/rest/v1/project_docs?select=*&doc_uid=eq.' + q(uid)); },
       async creationOf(owner, id) { const r = await raw('/rest/v1/creations?select=book_id&owner=eq.' + q(owner) + '&book_id=eq.' + q(id)); return r.length > 0; },

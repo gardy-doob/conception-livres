@@ -788,3 +788,22 @@ body.gated .top .saved,body.gated .top [data-act="backup"],body.gated .top #ver-
 .acct.off{opacity:.65}.acct-n{display:grid;gap:2px;min-width:0}.acct-a{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
 .acct-pw{font-size:13px;background:var(--ok-bg);border-radius:6px;padding:4px 8px;display:inline-flex;gap:6px;align-items:center}.acct-pw code{font-size:13px}
 .ok-msg{color:var(--ok)}
+/* header: Tableau de bord · Livres ▾ ; the rest lives in the menu */
+.top .wrap>.saved,.top .wrap>#ver-slot,.top .wrap>[data-act="backup"]{display:none}
+.books-dd{position:relative;display:inline-flex}
+.nav-dd{display:inline-flex;align-items:center;gap:5px;border:0;background:none;font:inherit;color:inherit;padding:6px 10px;border-radius:6px;cursor:pointer}
+.nav-dd .chev{transition:transform .15s}.books-dd:hover .chev,.books-dd.open .chev{transform:rotate(180deg)}
+.books-dd:hover .nav-dd,.books-dd.open .nav-dd,.nav-dd[aria-current="page"]{background:var(--sunk)}
+.dd-panel{display:none;position:absolute;top:100%;left:0;z-index:25;padding:10px;min-width:280px;width:max-content;max-width:min(860px,calc(100vw - 32px));box-shadow:0 12px 32px rgba(0,0,0,.16);max-height:75vh;overflow:auto}
+.books-dd::after{content:"";position:absolute;left:0;right:0;top:100%;height:8px}
+.books-dd:hover .dd-panel,.books-dd.open .dd-panel{display:block}
+.dd-cols{display:flex;gap:6px 18px;flex-wrap:wrap}.dd-col{min-width:190px}
+.top .wrap>#hist-slot{margin-left:auto}
+.dd-col{display:grid;align-content:start;gap:1px}
+.dd-panel a{display:grid;padding:6px 10px;border-radius:6px;text-decoration:none;color:var(--ink)}
+.dd-panel a small{color:var(--muted);font-size:12px}
+.dd-panel a:hover,.dd-panel a[aria-current="page"]{background:var(--sunk)}
+.dd-foot{border-top:1px solid var(--line);margin-top:8px;padding-top:6px}
+.dd-foot a{display:inline-block;font-size:13px;color:var(--accent)}
+.menu-acc{display:grid;gap:2px;padding:2px 10px 6px}
+@media (hover:none){.books-dd:hover .dd-panel{display:none}.books-dd.open .dd-panel{display:block}}

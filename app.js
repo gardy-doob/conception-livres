@@ -168,7 +168,7 @@ function progress(b){return STAGES.reduce((a,[k])=>a+ST[b.stages[k]||'todo'].w,0
 function usedPaths(b){const m=new Map();if(!b)return m;for(const [k,arr] of Object.entries(b.assign))for(const a of arr){if(!m.has(a.p))m.set(a.p,[]);m.get(a.p).push(+k)}return m}
 
 /* ================= storage ================= */
-function setSaved(t){document.getElementById('saved').textContent=t}
+function setSaved(t){document.getElementById('saved').textContent=t;const m=document.getElementById('menu-saved');if(m)m.textContent=t||'En ligne'}
 /* Local mode: each book is its own record in the browser's database (IndexedDB), so nothing hits the 5 MB limit,
    and every write pings the other open tabs of the same index.html so they reload that book. */
 const TAB_ID=Math.random().toString(36).slice(2);const PING='atelier-ping';
@@ -669,7 +669,7 @@ function visibleItems(){
 
 /* ================= routing ================= */
 function readHash(){const h=location.hash.slice(1);if(h.startsWith('livre-')){view.route='livre';view.id=h.slice(6)}else{view.route='avancement';view.id=null}view.sel.clear();view.highlight='';view.active=null;view.menu=false;view.edit=null;view.lpick=null;view.plpick=null;view.rsel=null}
-window.addEventListener('hashchange',()=>{readHash();render();window.scrollTo(0,0)});
+window.addEventListener('hashchange',()=>{readHash();view.booksOpen=false;view.menu=false;render();window.scrollTo(0,0)});
 
 /* ================= render ================= */
 function render(){
@@ -691,13 +691,18 @@ function render(){
   if(view.edit){const t=document.getElementById('pe-text');if(t&&document.activeElement!==t){t.focus();t.setSelectionRange(t.value.length,t.value.length)}}
 }
 function renderNav(b){
-  const all=[...books.values()];
-  let recent=all.slice().sort((a,z)=>String(z.updatedAt||'').localeCompare(String(a.updatedAt||''))).slice(0,3);
-  if(b&&!recent.includes(b))recent=[b,...recent.slice(0,2)];
-  const years=[...new Set(all.map(x=>+x.year||0))].sort((a,z)=>z-a);
-  return {links:`<a href="#avancement" ${view.route==='avancement'?'aria-current="page"':''}>Avancement</a>${recent.map(x=>`<a href="#livre-${esc(x.id)}" ${b&&x.id===b.id?'aria-current="page"':''}>${esc(x.title)}</a>`).join('')}`,burger:`
-    <span class="burger"><button class="icon-btn" data-act="menu" aria-expanded="${!!view.menu}" aria-label="Tous les livres" title="Tous les livres"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
-    ${view.menu?`<div class="menu panel">${years.map(y=>`<div class="menu-y">${y||'Sans année'}</div>${all.filter(x=>(+x.year||0)===y).sort((a,z)=>(a.order??999)-(z.order??999)||a.title.localeCompare(z.title)).map(x=>`<a href="#livre-${esc(x.id)}" ${b&&x.id===b.id?'aria-current="page"':''}>${esc(x.title)}</a>`).join('')}`).join('')}<div class="menu-sep"></div><a href="#avancement">Avancement de tous les livres</a><div class="menu-sep"></div>${cloudConfigured()?(CLOUD.user?`<div class="menu-y">En ligne</div><div class="small muted" style="padding:2px 10px">${esc(CLOUD.user.email||'')}</div><button class="mitem" data-act="my-pass">Changer mon mot de passe</button>${IS_ADMIN()?`<button class="mitem" data-act="accounts">Comptes des utilisateurs</button>`:''}<button class="mitem" data-act="cloud-out">Se déconnecter</button>`:`<a href="#avancement">Se connecter à l'espace en ligne</a>`):''}<div class="menu-sep"></div>${cloudOn()?`<button class="mitem" data-act="pj-files">Fichiers InDesign des projets</button>`:''}<a href="indesign/moodbook.ccx" download>Télécharger le panneau InDesign</a><div class="menu-sep"></div><button class="mitem" data-act="backup">Sauvegarder dans un fichier (.json)</button><button class="mitem" data-act="restore">Restaurer une sauvegarde…</button></div>`:''}</span>`};
+  const all=[...books.values()];const years=[...new Set(all.map(x=>+x.year||0))].sort((a,z)=>z-a);
+  const chev='<svg class="chev" viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const bookLink=x=>{const cr=inCreation(x);return `<a href="#livre-${esc(x.id)}" ${b&&x.id===b.id?'aria-current="page"':''}><span>${esc(x.title)}</span><small>${x.pageCount||0} p.${cr?' · en création':''}</small></a>`};
+  const dd=`<div class="books-dd ${view.booksOpen?'open':''}"><button class="nav-dd" data-act="books-dd" aria-expanded="${!!view.booksOpen}" aria-haspopup="true" ${b?'aria-current="page"':''}>Livres ${chev}</button>
+    <div class="dd-panel panel" role="menu"><div class="dd-cols">${years.map(y=>`<div class="dd-col"><div class="menu-y">${y||'Sans année'}</div>${all.filter(x=>(+x.year||0)===y).sort((a,z)=>(a.order??999)-(z.order??999)||a.title.localeCompare(z.title)).map(bookLink).join('')}</div>`).join('')||'<p class="small muted" style="margin:6px 10px">Aucun livre pour l\'instant.</p>'}</div>
+      <div class="dd-foot"><a href="#avancement">Tous les livres sur le tableau de bord</a></div></div></div>`;
+  const savedTxt=(document.getElementById('saved')||{}).textContent||'';
+  const acc=cloudConfigured()&&CLOUD.user?`<div class="menu-y">Compte</div><div class="menu-acc"><b>${esc(CLOUD.user.email||'')}</b><span class="small muted" id="menu-saved">${esc(savedTxt||'En ligne')}</span></div><button class="mitem" data-act="my-pass">Changer mon mot de passe</button>${IS_ADMIN()?`<button class="mitem" data-act="accounts">Comptes des utilisateurs</button>`:''}`:'';
+  const ver=IS_ADMIN()?`<div class="menu-sep"></div><div class="menu-y">Version</div><div class="menu-acc"><span class="mono small">v ${esc(fmtBuild(MB_VERSION))}</span></div><button class="mitem" data-act="load-latest">Charger la dernière version</button>`:'';
+  return {links:`<a href="#avancement" ${view.route==='avancement'?'aria-current="page"':''}>Tableau de bord</a>${dd}`,burger:`
+    <span class="burger"><button class="icon-btn" data-act="menu" aria-expanded="${!!view.menu}" aria-label="Menu" title="Menu"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
+    ${view.menu?`<div class="menu panel">${acc}${ver}<div class="menu-sep"></div><div class="menu-y">InDesign</div>${cloudOn()?`<button class="mitem" data-act="pj-files">Fichiers InDesign des projets</button>`:''}<a href="indesign/moodbook.ccx" download>Télécharger le panneau InDesign</a><div class="menu-sep"></div><div class="menu-y">Sauvegarde</div><button class="mitem" data-act="backup">Sauvegarder dans un fichier (.json)</button><button class="mitem" data-act="restore">Restaurer une sauvegarde…</button>${cloudConfigured()&&CLOUD.user?`<div class="menu-sep"></div><button class="mitem" data-act="cloud-out">Se déconnecter</button>`:''}</div>`:''}</span>`};
 }
 const headerH=()=>(document.querySelector('.top')?.offsetHeight||52);
 // Brings a full-height view (Visuel, Rédaction) right under the sticky section tabs
@@ -746,7 +751,7 @@ function renderProgress(){
         <td><a class="btn" href="#livre-${esc(b.id)}">Ouvrir</a></td></tr>`;
     }
   }
-  return renderCloudBox()+`<div class="head"><div><div class="eyebrow">Tous les projets</div><h1>Avancement des livres</h1></div>
+  return renderCloudBox()+`<div class="head"><div><div class="eyebrow">Tous les projets</div><h1>Tableau de bord</h1></div>
     <div class="row">${cloudOn()?`<button class="btn" data-act="pj-files">Fichiers InDesign${pjFixCount()?` <span class="pill bad">${pjFixCount()}</span>`:''}</button>`:''}<button class="btn primary" data-act="show-new">+ Nouveau livre</button></div></div>
     ${pjFixCount()?`<div class="warnbar">${pjFixCount()} projet${pjFixCount()>1?'s':''} en création sans fichier livre relié : synchronisation corrective recommandée.<button class="btn sm" data-act="pj-files">Voir les projets</button></div>`:''}
     ${newForm}
@@ -1448,7 +1453,7 @@ async function finishText(bid,tk){
   if(!hasText(rec)){toast("Le bloc est vide : écrivez d'abord le texte.");return}
   rec.st='checking';rec.err='';rec.q=[];rec.fx=[];save(b);
   const paras=rec.paras.map(plainOf);let res=null,err='';
-  if(!cloudOn())err="Relecture automatique indisponible : connectez-vous à l'espace en ligne (page Avancement).";
+  if(!cloudOn())err="Relecture automatique indisponible : connectez-vous à l'espace en ligne (page Tableau de bord).";
   else try{const {data,error}=await CLOUD.sb.functions.invoke('relecture',{body:{paras}});if(error)throw error;if(!data||data.error)throw new Error((data&&data.error)||'réponse vide');res=data}
   catch(e){const st=e&&e.context&&e.context.status;err=st===404?"La relecture n'est pas encore installée dans Supabase (fonction « relecture »).":`Relecture indisponible pour le moment${e&&e.message?' ('+e.message+')':''}.`}
   b=books.get(bid);rec=b&&b.texts[tk];if(!rec)return;
@@ -1475,7 +1480,7 @@ document.addEventListener('focusout',e=>{if(e.target&&e.target.id==='red-ed'){co
    La structure (pages, blocs, styles) vient du panneau InDesign (table creations). Chaque bloc photo et chaque texte
    est un enregistrement (table blocks) avec une version et un verrou : le site et InDesign écrivent bloc par bloc,
    jamais le livre entier, et une écriture sur une version périmée ou un bloc verrouillé est refusée. */
-const MB_VERSION='202610232002';
+const MB_VERSION='202610240851';
 const IS_ADMIN=()=>((CLOUD.user&&CLOUD.user.email)||'').toLowerCase()==='gardy.eugene@gmail.com';
 function fmtBuild(v){const m=String(v).match(/^(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)/);return m?`${m[3]}/${m[2]} ${m[4]}:${m[5]}`:v}
 function renderVersion(){const el=document.getElementById('ver-slot');if(!el)return;
@@ -1952,6 +1957,7 @@ async function trayCreate(how){
 
 document.addEventListener('click',async ev=>{
   if(view.menu&&!ev.target.closest('.burger:not(.hist)')){view.menu=false;render()}
+  if(view.booksOpen&&!ev.target.closest('.books-dd')){view.booksOpen=false;render()}
   if(view.hist&&!ev.target.closest('.hist')&&!ev.target.closest('.histmenu')){view.hist=false;renderHistSlot()}
   if(view.lpick!=null&&!ev.target.closest('.lpick')&&!ev.target.closest('[data-act="lpick"]')){view.lpick=null;render()}
   if(view.plpick!=null&&!ev.target.closest('.plpick')&&!ev.target.closest('[data-act="plpick"]')&&!ev.target.closest('[data-act="r-plpick"]')){view.plpick=null;render()}
@@ -2048,7 +2054,8 @@ document.addEventListener('click',async ev=>{
     case 'lp-set':{const k=t.dataset.key,id=t.dataset.lay;if(id)b.spreads[k]=id;else delete b.spreads[k];view.lpick=null;save(b);break}
     case 'ins-pl':insertPlanche(b,+t.dataset.key);break;
     case 'pl-del-planche':{const k=+t.dataset.key;if(view.armed==='pldel:'+k){view.armed=null;deletePlanche(b,k)}else arm('pldel:'+k);break}
-    case 'menu':view.menu=!view.menu;render();break;
+    case 'menu':view.menu=!view.menu;view.booksOpen=false;render();break;
+    case 'books-dd':view.booksOpen=!view.booksOpen;view.menu=false;render();break;
     case 'undo':t.closest('.toast')?.remove();histUndo();break;
     case 'hist':view.hist=!view.hist;renderHistSlot();break;
     case 'h-undo':histUndo();renderHistSlot();break;

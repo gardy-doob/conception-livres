@@ -241,7 +241,7 @@
       try {
         const blocks = this.dom.readBlocks(doc, { full: !!opt.full, cache: this.textCache, only: opt.only, root: this.book });
         for (const blk of blocks) await this.syncBlock(doc, blk, mod, opt);
-        this.saveState();
+        this.saveState(); this.lastSync = this.now();
       } finally { this.busy = false; }
       this.onChange();
       if (this.queued.size) { const only = [...this.queued]; this.queued.clear(); await this.sync(doc, { only, noPush: opt.noPush }); }

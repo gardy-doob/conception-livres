@@ -4,39 +4,70 @@
 <meta charset="utf-8">
 <style>
   html, body { height: 100%; }
-  body { margin: 0; padding: 10px; box-sizing: border-box; overflow-y: auto; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 12px; color: var(--uxp-host-text-color, #e8e8e8); background: var(--uxp-host-background-color, #323232); }
-  h1 { font-size: 14px; margin: 0 0 8px; display: flex; align-items: center; gap: 6px; }
-  h1 i { display: inline-block; width: 8px; height: 11px; border: 1.5px solid currentColor; border-radius: 2px; }
-  h1 i + i { background: #B0275C; border-color: #B0275C; margin-left: -4px; }
-  .muted { opacity: .7; }
-  .box { border: 1px solid rgba(128,128,128,.4); border-radius: 6px; padding: 8px; margin: 8px 0; }
-  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-  input, select { width: 100%; box-sizing: border-box; padding: 5px 6px; margin: 3px 0; font-size: 12px; }
-  button { padding: 5px 10px; font-size: 12px; cursor: pointer; border-radius: 4px; border: 1px solid rgba(128,128,128,.6); background: transparent; color: inherit; }
-  button.primary { background: #B0275C; border-color: #B0275C; color: #fff; }
-  button.sm { padding: 2px 7px; font-size: 11px; }
-  .status { font-weight: 600; }
-  .live { color: #53C3DD; } .calm { color: #9fd3a8; } .err { color: #ff8a80; }
-  .pres { display: flex; gap: 6px; align-items: center; margin: 2px 0; }
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: #7CCB98; flex: none; }
-  .dot.idle { background: #888; }
-  .conf { border: 1px solid #F2B657; border-radius: 6px; padding: 6px; margin: 6px 0; }
-  .conf pre { white-space: pre-wrap; margin: 3px 0; max-height: 80px; overflow: auto; font: inherit; background: rgba(128,128,128,.15); padding: 4px; border-radius: 3px; }
-  .log { max-height: 180px; overflow-y: auto; }
-  .scroll { max-height: 240px; overflow-y: auto; }
-  details summary { cursor: pointer; font-weight: 600; }
-  .box.warn { border-color: #F2B657; }
-  label.muted { display: block; margin-top: 6px; }
-  .todo { display: flex; gap: 6px; align-items: flex-start; padding: 3px 0; }
+  body { margin: 0; padding: 0 12px 16px; box-sizing: border-box; overflow-y: auto; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 12px; line-height: 1.4;
+    color: var(--uxp-host-text-color, #e8e8e8); background: var(--uxp-host-background-color, #323232); }
+  .muted { opacity: .65; } .small { font-size: 11px; } .center { text-align: center; }
+  .err { color: #ff8a80; } .status { font-weight: 600; margin: 6px 0; }
+  .hd { display: flex; align-items: center; gap: 8px; padding: 12px 0 10px; font-size: 14px; position: relative; }
+  .hd .sp { flex: 1; }
+  .logo { display: inline-flex; } .logo i { width: 8px; height: 12px; border: 1.5px solid currentColor; border-radius: 2px; }
+  .logo i + i { background: #C2477A; border-color: #C2477A; margin-left: -3px; }
+  .iconbtn { border: 0; background: transparent; color: inherit; padding: 4px 6px; border-radius: 6px; cursor: pointer; opacity: .8; }
+  .iconbtn:hover { background: rgba(128,128,128,.2); opacity: 1; }
+  .menu { position: absolute; right: 12px; top: 40px; z-index: 5; min-width: 220px; background: var(--uxp-host-background-color, #2a2a2a); border: 1px solid rgba(128,128,128,.45); border-radius: 8px; padding: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+  .menu .muted { padding: 4px 8px 6px; }
+  .mitem { display: block; width: 100%; text-align: left; border: 0; background: transparent; color: inherit; padding: 7px 8px; border-radius: 5px; cursor: pointer; font-size: 12px; }
+  .mitem:hover { background: rgba(128,128,128,.2); }
+  .tabs { display: flex; gap: 14px; border-bottom: 1px solid rgba(128,128,128,.35); margin: 0 -12px 12px; padding: 0 12px; }
+  .tab { border: 0; background: transparent; color: inherit; opacity: .65; padding: 8px 0 9px; font-size: 13px; cursor: pointer; border-bottom: 2px solid transparent; display: inline-flex; align-items: center; gap: 5px; }
+  .tab.on { opacity: 1; font-weight: 600; border-bottom-color: #C2477A; }
+  .badge { font-size: 10px; font-weight: 700; background: rgba(128,128,128,.35); border-radius: 999px; padding: 0 6px; line-height: 16px; }
+  .badge.warn { background: #F2B657; color: #2a1d00; }
+  .card { border: 1px solid rgba(128,128,128,.35); border-radius: 10px; padding: 12px; margin: 0 0 10px; }
+  .card.warn { border-color: rgba(242,182,87,.7); background: rgba(242,182,87,.08); }
+  .card p { margin: 6px 0; }
+  .eyebrow { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; opacity: .6; margin-bottom: 4px; }
+  h2 { font-size: 17px; margin: 2px 0 2px; font-weight: 700; }
+  .state { display: flex; gap: 10px; align-items: flex-start; margin: 12px 0 10px; }
+  .state .ic { flex: none; width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }
+  .state.ok .ic { background: rgba(124,203,152,.22); color: #7CCB98; } .state.ok b { color: #9fdcb3; }
+  .state.live .ic { background: rgba(83,195,221,.22); color: #53C3DD; } .state.live b { color: #7fd6ea; }
+  .state b { font-size: 13px; } .state p { margin: 2px 0 0; opacity: .7; }
+  .kv { display: flex; justify-content: space-between; gap: 8px; padding: 7px 0; border-top: 1px solid rgba(128,128,128,.2); }
+  .kv span { opacity: .7; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 12px; font-size: 12px; border-radius: 999px; border: 1px solid rgba(128,128,128,.6); background: transparent; color: inherit; cursor: pointer; }
+  .btn:hover { border-color: rgba(200,200,200,.9); }
+  .btn.primary { background: #f0f0f0; border-color: #f0f0f0; color: #1d1d1d; font-weight: 600; }
+  .btn.block { display: flex; width: 100%; margin: 0 0 8px; padding: 9px 12px; font-size: 13px; }
+  .btn.sm { padding: 3px 9px; font-size: 11px; }
+  .linkbtn { display: block; margin: 4px auto 12px; border: 0; background: transparent; color: inherit; opacity: .7; cursor: pointer; font-size: 12px; text-decoration: underline; }
+  .linkbtn:hover { opacity: 1; }
+  .hint { font-size: 11px; opacity: .6; margin: 0 0 10px; }
+  .banner { display: flex; gap: 10px; align-items: flex-start; width: 100%; text-align: left; border: 1px solid rgba(242,182,87,.6); background: rgba(242,182,87,.12); color: inherit; border-radius: 10px; padding: 10px 12px; cursor: pointer; }
+  .banner .ic { color: #F2B657; } .banner b { display: block; color: #F2B657; } .banner u { font-size: 11px; opacity: .85; }
+  .lbl { display: block; font-size: 11px; opacity: .7; margin: 10px 0 3px; }
+  input, select { width: 100%; box-sizing: border-box; padding: 6px 8px; font-size: 12px; }
+  .row2 { display: flex; gap: 8px; } .row2 > div { flex: 1; }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+  .seg { display: flex; border: 1px solid rgba(128,128,128,.5); border-radius: 999px; padding: 2px; margin-bottom: 12px; }
+  .seg button { flex: 1; border: 0; background: transparent; color: inherit; padding: 6px 8px; border-radius: 999px; cursor: pointer; font-size: 12px; opacity: .75; }
+  .seg button.on { background: #f0f0f0; color: #1d1d1d; opacity: 1; font-weight: 600; }
+  .newbook { border-left: 2px solid #C2477A; padding-left: 10px; margin: 8px 0 4px; }
+  .addrow { display: flex; gap: 6px; align-items: center; margin-top: 8px; } .addrow .pg { width: 46px; flex: none; }
+  .todo { display: flex; gap: 6px; align-items: flex-start; padding: 4px 0; }
   .todo input { width: auto; margin: 2px 0 0; }
   .todo.done span { text-decoration: line-through; opacity: .6; }
-  .log div { padding: 2px 0; border-bottom: 1px solid rgba(128,128,128,.15); }
-  .log b { font-weight: 400; opacity: .6; margin-right: 4px; }
+  .conf { border-top: 1px solid rgba(128,128,128,.3); padding: 8px 0; }
+  .conf pre { white-space: pre-wrap; margin: 3px 0; max-height: 80px; overflow: auto; font: inherit; background: rgba(128,128,128,.15); padding: 4px; border-radius: 4px; }
+  .scroll { max-height: 240px; overflow-y: auto; }
+  .log { max-height: 320px; overflow-y: auto; }
+  .log div { padding: 4px 0; border-bottom: 1px solid rgba(128,128,128,.15); }
+  .log div.bad { color: #F2B657; }
+  .log b { font-weight: 400; opacity: .6; margin-right: 6px; }
 </style>
 </head>
 <body>
-  <h1><i></i><i></i> moodbook</h1>
-  <div id="app"><p class="muted">Chargement…</p></div>
+  <div id="app"><p class="muted" style="padding-top:12px">Chargement…</p></div>
   <script src="config.js"></script>
   <script src="jpeg.js"></script>
   <script src="engine.js"></script>
