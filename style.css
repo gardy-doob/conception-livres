@@ -837,8 +837,8 @@ body.gated .top .saved,body.gated .top [data-act="backup"],body.gated .top #ver-
 .fxtitle span{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.8}.fxtitle b{font-size:20px;font-weight:600}
 .fxcard{flex:1;min-width:0;margin-bottom:32px;padding:14px 16px 16px;border-radius:14px;border:1px solid var(--line);background:var(--surface);cursor:text;opacity:.55;filter:blur(1px);transition:opacity .25s,filter .25s,border-color .2s,box-shadow .2s}
 .fxcard:hover,.fxcard.act,.fxcard.lit{opacity:1;filter:none}
-.fxcard:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--line))}
-.fxcard.act{border:1.5px solid var(--accent);box-shadow:0 8px 24px rgba(176,39,92,.10);cursor:auto}
+.fxcard:hover,.fxcard.lit{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 6px 18px rgba(176,39,92,.10)}
+.fxcard.act{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent),0 10px 28px rgba(176,39,92,.16);cursor:auto}
 .fxhead{display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap}.fxhead>.small{flex:1}
 .fxtools{display:flex;gap:4px}
 .fxb{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:6px;padding:3px 9px;font:inherit;font-size:12px;font-weight:600;cursor:pointer}
@@ -846,7 +846,9 @@ body.gated .top .saved,body.gated .top [data-act="backup"],body.gated .top #ver-
 .fxprev p{margin:0 0 .35em;line-height:1.5}
 .fxcard .red-ed{min-height:60px}
 @media (max-width:1100px){.fx-pages{flex-basis:20%;padding:10px;gap:14px}.fxsp-l{display:none}.fxsp{padding:6px}}
-html.fx-lock,html.fx-lock body{overflow:hidden;overscroll-behavior:none;height:100%}
+html.fx-lock,html.fx-lock body{overflow:hidden;overscroll-behavior:none;overflow-anchor:none}
+.fx-pages,.fx-text{overscroll-behavior:contain;overflow-anchor:none}
+body.has-rbar .redac.fx{height:auto}
 .fx-mhead{display:none}
 @media (max-width:700px){.redac.fx{position:fixed;left:0;right:0;z-index:15;background:var(--paper);padding:6px 12px 8px;display:flex;flex-direction:column;gap:6px;height:auto}
   .fx-mhead{display:flex;align-items:center;gap:8px}.fx-mhead .fx-sw{margin-left:0}

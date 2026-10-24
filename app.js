@@ -1483,7 +1483,7 @@ document.addEventListener('focusout',e=>{if(e.target&&e.target.id==='red-ed'){co
    La structure (pages, blocs, styles) vient du panneau InDesign (table creations). Chaque bloc photo et chaque texte
    est un enregistrement (table blocks) avec une version et un verrou : le site et InDesign écrivent bloc par bloc,
    jamais le livre entier, et une écriture sur une version périmée ou un bloc verrouillé est refusée. */
-const MB_VERSION='202610240924';
+const MB_VERSION='202610240928';
 const IS_ADMIN=()=>((CLOUD.user&&CLOUD.user.email)||'').toLowerCase()==='gardy.eugene@gmail.com';
 function fmtBuild(v){const m=String(v).match(/^(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)/);return m?`${m[3]}/${m[2]} ${m[4]}:${m[5]}`:v}
 function renderVersion(){const el=document.getElementById('ver-slot');if(!el)return;
@@ -1691,10 +1691,16 @@ function fxSync(src,dst){
 }
 // Phone: the whole interface stays still; only the texts scroll, and they drive the strip of pages sideways
 function fxFit(){
-  const rd=document.querySelector('.redac.fx');const mob=!!rd&&matchMedia('(max-width:700px)').matches;
-  document.documentElement.classList.toggle('fx-lock',mob);if(!rd)return;
-  if(!mob){rd.style.top=rd.style.bottom='';return}
-  const sb=document.querySelector('#rbarslot .pool');rd.style.top=headerH()+'px';rd.style.bottom=(sb?sb.offsetHeight:0)+'px';
+  // Focus mode: the page itself never scrolls. On a computer or a tablet the section tabs are brought just under the
+  // header and the Focus area fills the rest of the window; on a phone it covers the screen between header and bottom bar.
+  const rd=document.querySelector('.redac.fx');const on=!!rd;
+  document.documentElement.classList.toggle('fx-lock',on);if(!on)return;
+  const mob=matchMedia('(max-width:700px)').matches;const sb=document.querySelector('#rbarslot .pool');const bh=sb?sb.offsetHeight:0;
+  if(mob){rd.style.height='';rd.style.top=headerH()+'px';rd.style.bottom=bh+'px';return}
+  rd.style.top=rd.style.bottom='';
+  const tabs=document.querySelector('.tabs2');const want=tabs?tabs.getBoundingClientRect().top+window.scrollY-headerH()-4:0;
+  document.documentElement.classList.remove('fx-lock');window.scrollTo(0,Math.max(0,want));document.documentElement.classList.add('fx-lock');
+  rd.style.height=Math.max(320,window.innerHeight-rd.getBoundingClientRect().top-bh-10)+'px';
 }
 window.addEventListener('resize',()=>{if(document.querySelector('.redac.fx'))fxFit()});
 function fxBind(){
