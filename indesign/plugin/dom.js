@@ -296,8 +296,14 @@
       const lfs = uxp.storage.localFileSystem; const f = await lfs.getFileForOpening({ types: ['jpg', 'jpeg', 'jfif', 'JPG', 'JPEG'] });
       if (!f) return null;
       const abs = f.nativePath; const conv = await placeFile(sel, abs);
-      safe(() => sel.fit(E.FitOptions.FILL_PROPORTIONALLY)); safe(() => sel.fit(E.FitOptions.CENTER_CONTENT));
+      fitPlaced(sel);
       return { name: abs.split('/').pop(), converted: conv ? conv.path : null };
+    }
+    // The photo takes the frame's own fitting options (« Options de ajustement du bloc ») when it has some, otherwise fill + centre
+    function fitPlaced(fr) {
+      const ft = fitOf(fr);
+      if (ft && ft.m !== 'none' && E.FitOptions.APPLY_FRAME_FITTING_OPTIONS != null) { if (safe(() => { fr.fit(E.FitOptions.APPLY_FRAME_FITTING_OPTIONS); return true; }, false)) return; }
+      safe(() => fr.fit(E.FitOptions.FILL_PROPORTIONALLY)); safe(() => fr.fit(E.FitOptions.CENTER_CONTENT));
     }
     async function writeBlock(d, blk, data, book) {
       if (blk.kind === 'tx') {
@@ -308,7 +314,7 @@
       if (!data || !data.p) { for (const g of els(fr.allGraphics)) safe(() => g.remove()); return; }
       const abs = absPath(d, data.p, book); if (!abs) throw new Error('dossier photos introuvable pour « ' + data.p + ' »');
       const conv = await placeFile(fr, abs);
-      safe(() => fr.fit(E.FitOptions.FILL_PROPORTIONALLY)); safe(() => fr.fit(E.FitOptions.CENTER_CONTENT));
+      fitPlaced(fr);
       return conv ? { converted: conv.path, reused: !!conv.reused } : null;
     }
     function findFrame(d, id) { for (const sp of allSpreads(d)) for (const it of els(sp.allPageItems)) if (it.id === id) return it; return null; }
@@ -344,13 +350,45 @@
     }
     const JUST = [['LEFT_ALIGN', 'l'], ['CENTER_ALIGN', 'c'], ['RIGHT_ALIGN', 'r'], ['LEFT_JUSTIFIED', 'j'], ['CENTER_JUSTIFIED', 'jc'], ['RIGHT_JUSTIFIED', 'jr'], ['FULLY_JUSTIFIED', 'jf'], ['TO_BINDING_SIDE', 'b'], ['AWAY_FROM_BINDING_SIDE', 'a']];
     const just = v => { for (const [k, s] of JUST) if (eq(v, E.Justification[k])) return s; return 'l'; };
-    function styleOf(p) {
-      const sz = safe(() => p.pointSize, 10); let ld = safe(() => p.leading, null); if (typeof ld !== 'number') ld = sz * safe(() => p.autoLeading, 120) / 100;
-      return { st: safe(() => String(p.appliedParagraphStyle.name), ''), ff: safe(() => String(p.appliedFont.fontFamily), ''), fs: safe(() => String(p.fontStyle), 'Regular'),
-        sz: r2(sz), ld: r2(ld), al: just(safe(() => p.justification, null)), col: color(safe(() => p.fillColor, null), safe(() => p.fillTint, -1)),
+    // Paragraph settings for the site (sizes in points: k = points per document unit for spaces and indents)
+    const LANGS = [[/fran|french/i, 'fr'], [/engl|anglais/i, 'en'], [/germ|deutsch|allem/i, 'de'], [/span|espa/i, 'es'], [/ital/i, 'it'], [/dutch|n[eé]erl/i, 'nl'], [/portu/i, 'pt'], [/no lang|aucune/i, 'zxx']];
+    function langOf(p) { const n = safe(() => String(p.appliedLanguage.name), ''); for (const [re, c] of LANGS) if (re.test(n)) return c; return ''; }
+    function swjOf(p) { const v = safe(() => p.singleWordJustification, null), S = E.SingleWordJustification || {}; return eq(v, S.LEFT_ALIGN) ? 'l' : eq(v, S.CENTER_ALIGN) ? 'c' : eq(v, S.RIGHT_ALIGN) ? 'r' : 'j'; }
+    function styleOf(p, k) {
+      k = k || 1;
+      const sz = safe(() => p.pointSize, 10); let ld = safe(() => p.leading, null);
+      const auto = typeof ld !== 'number' || eq(ld, (E.Leading || {}).AUTO) || ld > 5000;
+      if (auto) ld = sz * safe(() => p.autoLeading, 120) / 100;
+      const bal = safe(() => p.balanceRaggedLines, false);
+      return { st: safe(() => String(p.appliedParagraphStyle.name), ''), ff: safe(() => String(p.appliedFont.fontFamily), ''), ps: safe(() => { const v = p.appliedFont.postscriptName; return v ? String(v) : ''; }, ''), fs: safe(() => String(p.fontStyle), 'Regular'),
+        sz: r2(sz), ld: r2(ld), la: auto ? r2(safe(() => p.autoLeading, 120)) : 0, al: just(safe(() => p.justification, null)), col: color(safe(() => p.fillColor, null), safe(() => p.fillTint, -1)),
         caps: safe(() => eq(p.capitalization, E.Capitalization.ALL_CAPS), false) ? 'all' : safe(() => eq(p.capitalization, E.Capitalization.SMALL_CAPS), false) ? 'small' : '',
-        tr: safe(() => p.tracking, 0), sb: r2(safe(() => p.spaceBefore, 0)), sa: r2(safe(() => p.spaceAfter, 0)), fi: r2(safe(() => p.firstLineIndent, 0)), li: r2(safe(() => p.leftIndent, 0)), ri: r2(safe(() => p.rightIndent, 0)),
-        t: String(safe(() => p.contents, '')).replace(/\r$/, '').slice(0, 400) };
+        tr: safe(() => p.tracking, 0), sb: r2(safe(() => p.spaceBefore, 0) * k), sa: r2(safe(() => p.spaceAfter, 0) * k), fi: r2(safe(() => p.firstLineIndent, 0) * k), li: r2(safe(() => p.leftIndent, 0) * k), ri: r2(safe(() => p.rightIndent, 0) * k),
+        hy: safe(() => p.hyphenation, true) ? [safe(() => p.hyphenateAfterFirst, 2), safe(() => p.hyphenateBeforeLast, 2), safe(() => p.hyphenateWordsLongerThan, 5)] : 0,
+        lang: langOf(p), swj: swjOf(p), lli: r2(safe(() => p.lastLineIndent, 0) * k), bal: bal && !/NO_BALANCING/.test(String(bal)) ? 1 : 0,
+        t: String(safe(() => p.contents, '')).replace(/\r$/, '').slice(0, 4000) };
+    }
+    // InDesign's own line breaks: per paragraph, the exact text fingerprint and the length of each line.
+    // Reading lines is slow in InDesign: kept per story until its text or its frames change.
+    function xhash(t) { return hash(String(t).replace(/\u2028/g, '\n')); }
+    const lmCache = new Map();
+    function lineMap(st, key) {
+      const sid = String(safe(() => st.id, '')); const c = lmCache.get(sid); if (c && c.key === key) return c.lm;
+      const lm = els(st.paragraphs).slice(0, 40).map(para => {
+        const txt = String(safe(() => para.contents, '')).replace(/\r$/, '');
+        const L = els(safe(() => para.lines, null)).slice(0, 400).map(l => String(safe(() => l.contents, '')).replace(/\r$/, '').length);
+        return { x: xhash(txt), L };
+      });
+      lmCache.set(sid, { key, lm }); return lm;
+    }
+    const FIT_A = [['TOP_LEFT_ANCHOR', 'tl'], ['TOP_CENTER_ANCHOR', 't'], ['TOP_RIGHT_ANCHOR', 'tr'], ['LEFT_CENTER_ANCHOR', 'l'], ['CENTER_ANCHOR', 'c'], ['RIGHT_CENTER_ANCHOR', 'r'], ['BOTTOM_LEFT_ANCHOR', 'bl'], ['BOTTOM_CENTER_ANCHOR', 'b'], ['BOTTOM_RIGHT_ANCHOR', 'br']];
+    function fitOf(it) {
+      const o = safe(() => it.frameFittingOptions, null); if (!o) return null;
+      const al = safe(() => o.fittingAlignment, null), A = E.AnchorPoint || {}; let a = 'c';
+      for (const [n, c] of FIT_A) if (A[n] != null && eq(al, A[n])) a = c;
+      const e = safe(() => o.fittingOnEmptyFrame, null), F = E.EmptyFrameFittingOptions || {};
+      const m = eq(e, F.FILL_PROPORTIONALLY) ? 'fill' : eq(e, F.PROPORTIONALLY) ? 'fit' : eq(e, F.CONTENT_TO_FRAME) ? 'frame' : 'none';
+      return { a, m };
     }
     function shapeOf(it) {
       if (cn(it) === 'Oval') return { sh: 'ov' };
@@ -387,6 +425,7 @@
             f.ln = linkOf(it).replace(/\\/g, '/').split('/').pop().toLowerCase();
             const g = safe(() => els(it.allGraphics)[0], null); const gb = g ? safe(() => g.geometricBounds, null) : null;
             if (Array.isArray(gb)) f.gc = gb.map(v => Math.round(v * 10) / 10).join(',');
+            const ft = fitOf(it); if (ft) f.fit = ft;
           }
           else {
             const st = it.parentStory, sid = String(st.id); f.bid = 's' + sid; f.st = sid;
@@ -394,7 +433,15 @@
             const tp = it.textFramePreferences; f.cols = safe(() => tp.textColumnCount, 1); f.gut = r2(safe(() => tp.textColumnGutter, 12) * k);
             const ins = safe(() => tp.insetSpacing, 0); f.ins = Array.isArray(ins) ? ins.map(v => r2(v * k)) : [0, 0, 0, 0].map(() => r2((ins || 0) * k));
             const vj = safe(() => tp.verticalJustification, null); f.vj = eq(vj, E.VerticalJustification.CENTER_ALIGN) ? 'c' : eq(vj, E.VerticalJustification.BOTTOM_ALIGN) ? 'b' : eq(vj, E.VerticalJustification.JUSTIFY_ALIGN) ? 'j' : 't';
-            if (!storiesOut[sid]) storiesOut[sid] = { paras: els(st.paragraphs).slice(0, 40).map(styleOf), n: els(st.textContainers).length };
+            // first baseline from the frame top (points) and number of lines, as composed by InDesign
+            const lines = els(safe(() => it.lines, null)); f.nl = lines.length;
+            const g0 = safe(() => it.geometricBounds, null), bl = lines.length ? safe(() => lines[0].baseline, null) : null;
+            if (!rot && Array.isArray(g0) && typeof bl === 'number') f.fb = r2((bl - g0[0]) * k);
+            if (!storiesOut[sid]) {
+              const conts = els(st.textContainers);
+              const key = hash(storyText(sid)) + '|' + conts.map(c => String(safe(() => c.geometricBounds, '')) + String(safe(() => c.textFramePreferences.textColumnCount, 1))).join(';');
+              storiesOut[sid] = { paras: els(st.paragraphs).slice(0, 40).map(p => styleOf(p, k)), n: conts.length, lm: lineMap(st, key) };
+            }
           }
           per[pi].push(f);
         });

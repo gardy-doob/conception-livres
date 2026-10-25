@@ -88,7 +88,8 @@
   var pText = progress.add("statictext", undefined, "Lecture des pages…"); pText.preferredSize = [360, 18];
   var pBar = progress.add("progressbar", undefined, 0, Math.max(1, doc.pages.length * 3)); pBar.preferredSize = [360, 8];
   progress.show();
-  var result = { app: "cdf-mep", v: 1, doc: docName, at: new Date().toString(), ph: placeholders, pages: [], stories: {} };
+  var mbUid = safe(function () { var m = String(doc.extractLabel("mb-doc")).match(/"uid":"([^"]+)"/); return m ? m[1] : ""; }, "");
+  var result = { app: "cdf-mep", v: 1, doc: docName, uid: mbUid, at: new Date().toString(), ph: placeholders, pages: [], stories: {} };
   var nPh = 0, nTx = 0;
 
   var JUST = [["LEFT_ALIGN", "l"], ["CENTER_ALIGN", "c"], ["RIGHT_ALIGN", "r"], ["LEFT_JUSTIFIED", "j"], ["CENTER_JUSTIFIED", "jc"], ["RIGHT_JUSTIFIED", "jr"], ["FULLY_JUSTIFIED", "jf"], ["TO_BINDING_SIDE", "b"], ["AWAY_FROM_BINDING_SIDE", "a"]];
@@ -106,26 +107,55 @@
     }, null);
   }
   function capsOf(p) { return safe(function () { return p.capitalization == Capitalization.ALL_CAPS ? "all" : p.capitalization == Capitalization.SMALL_CAPS ? "small" : (p.capitalization == Capitalization.CAP_TO_SMALL_CAP ? "small" : ""); }, ""); }
+  // ---------- extras for a faithful rendering on the site ----------
+  // exact fingerprint of a paragraph's text (same function on the site): its InDesign line breaks are reused while it is unchanged
+  function xhash(t) { t = String(t).replace(/\u2028/g, "\n"); var h = 5381; for (var i = 0; i < t.length; i++) { h = ((h << 5) + h + t.charCodeAt(i)) | 0; } return (h >>> 0).toString(36); }
+  function langOf(p) { return safe(function () { var n = String(p.appliedLanguage.name); return /fran|french/i.test(n) ? "fr" : /engl|anglais/i.test(n) ? "en" : /germ|deutsch|allem/i.test(n) ? "de" : /span|espa/i.test(n) ? "es" : /ital/i.test(n) ? "it" : /dutch|n[eé]erl/i.test(n) ? "nl" : /portu/i.test(n) ? "pt" : /no lang|aucune/i.test(n) ? "zxx" : ""; }, ""); }
+  function swjOf(p) { return safe(function () { var v = p.singleWordJustification; return v == SingleWordJustification.LEFT_ALIGN ? "l" : v == SingleWordJustification.CENTER_ALIGN ? "c" : v == SingleWordJustification.RIGHT_ALIGN ? "r" : "j"; }, "j"); }
+  function lineMap(story) {
+    var out = []; var ps = story.paragraphs;
+    for (var i = 0; i < ps.length && i < 40; i++) {
+      var para = ps[i]; var txt = safe(function () { return String(para.contents); }, "").replace(/\r$/, "");
+      var L = []; var ls = safe(function () { return para.lines; }, null); var n = ls ? safe(function () { return ls.length; }, 0) : 0;
+      for (var j = 0; j < n && j < 400; j++) { var c = safe(function () { return String(ls[j].contents); }, ""); L.push(c.replace(/\r$/, "").length); }
+      out.push({ x: xhash(txt), L: L });
+    }
+    return out;
+  }
+  var ANCH = [["TOP_LEFT_ANCHOR", "tl"], ["TOP_CENTER_ANCHOR", "t"], ["TOP_RIGHT_ANCHOR", "tr"], ["LEFT_CENTER_ANCHOR", "l"], ["CENTER_ANCHOR", "c"], ["RIGHT_CENTER_ANCHOR", "r"], ["BOTTOM_LEFT_ANCHOR", "bl"], ["BOTTOM_CENTER_ANCHOR", "b"], ["BOTTOM_RIGHT_ANCHOR", "br"]];
+  function fitOf(it) {
+    return safe(function () {
+      var o = it.frameFittingOptions; var a = "c";
+      for (var i = 0; i < ANCH.length; i++) if (safe(function () { return o.fittingAlignment == AnchorPoint[ANCH[i][0]]; }, false)) a = ANCH[i][1];
+      var e = o.fittingOnEmptyFrame; var m = e == EmptyFrameFittingOptions.FILL_PROPORTIONALLY ? "fill" : e == EmptyFrameFittingOptions.PROPORTIONALLY ? "fit" : e == EmptyFrameFittingOptions.CONTENT_TO_FRAME ? "frame" : "none";
+      return { a: a, m: m };
+    }, null);
+  }
   function paraInfo(p) {
     var sz = safe(function () { return p.pointSize; }, 10), ld = safe(function () { return p.leading; }, null);
-    if (typeof ld !== "number") ld = sz * safe(function () { return p.autoLeading; }, 120) / 100;
+    var isAuto = typeof ld !== "number" || safe(function () { return p.leading == Leading.AUTO; }, false) || ld > 5000;
+    if (isAuto) ld = sz * safe(function () { return p.autoLeading; }, 120) / 100;
     var txt = safe(function () { return String(p.contents); }, "");
     return {
       st: safe(function () { return String(p.appliedParagraphStyle.name); }, ""),
       ff: safe(function () { return String(p.appliedFont.fontFamily); }, safe(function () { return String(p.appliedFont).split("\t")[0]; }, "")),
+      ps: safe(function () { var v = p.appliedFont.postscriptName; return v ? String(v) : ""; }, ""),
+      la: isAuto ? r2(safe(function () { return p.autoLeading; }, 120)) : 0,
+      hy: safe(function () { return p.hyphenation; }, true) ? [safe(function () { return p.hyphenateAfterFirst; }, 2), safe(function () { return p.hyphenateBeforeLast; }, 2), safe(function () { return p.hyphenateWordsLongerThan; }, 5)] : 0,
+      lang: langOf(p), swj: swjOf(p), lli: r2(safe(function () { return p.lastLineIndent; }, 0)), bal: safe(function () { return !!p.balanceRaggedLines && String(p.balanceRaggedLines) !== "NO_BALANCING"; }, false) ? 1 : 0,
       fs: safe(function () { return String(p.fontStyle); }, "Regular"),
       sz: r2(sz), ld: r2(ld), al: just(safe(function () { return p.justification; }, null)),
       col: color(safe(function () { return p.fillColor; }, null), safe(function () { return p.fillTint; }, -1)),
       caps: capsOf(p), tr: safe(function () { return p.tracking; }, 0),
       sb: r2(safe(function () { return p.spaceBefore; }, 0)), sa: r2(safe(function () { return p.spaceAfter; }, 0)),
       fi: r2(safe(function () { return p.firstLineIndent; }, 0)), li: r2(safe(function () { return p.leftIndent; }, 0)), ri: r2(safe(function () { return p.rightIndent; }, 0)),
-      t: txt.replace(/\r$/, "").substr(0, 1500)
+      t: txt.replace(/\r$/, "").substr(0, 4000)
     };
   }
   function storyInfo(story) {
     var ps = story.paragraphs, out_ = [], total = 0;
     for (var i = 0; i < ps.length && i < 40 && total < 6000; i++) { var pi = paraInfo(ps[i]); total += pi.t.length; out_.push(pi); }
-    return { paras: out_, n: safe(function () { return story.textContainers.length; }, 1) };
+    return { paras: out_, n: safe(function () { return story.textContainers.length; }, 1), lm: lineMap(story) };
   }
   function isOnlyGraphic(tf) {
     return safe(function () { return tf.parentStory.allGraphics.length > 0 && String(tf.parentStory.contents).replace(/[\s￼]/g, "") === ""; }, false);
@@ -188,8 +218,10 @@
           var ins = safe(function () { return tp.insetSpacing; }, 0); fr.ins = ins instanceof Array ? [r2(ins[0]), r2(ins[1]), r2(ins[2]), r2(ins[3])] : [r2(ins), r2(ins), r2(ins), r2(ins)];
           fr.vj = safe(function () { var v = tp.verticalJustification; return v == VerticalJustification.CENTER_ALIGN ? "c" : v == VerticalJustification.BOTTOM_ALIGN ? "b" : v == VerticalJustification.JUSTIFY_ALIGN ? "j" : "t"; }, "t");
           if (safe(function () { return it.overflows; }, false)) fr.ov = true;
+          if (!fr.r) { var bl = safe(function () { return it.lines.length ? it.lines[0].baseline : null; }, null); if (typeof bl === "number") fr.fb = r2(bl - gb[0]); }
+          fr.nl = safe(function () { return it.lines.length; }, 0);
           nTx++;
-        } else { if (link) fr.ln = link; nPh++; }
+        } else { if (link) fr.ln = link; var ft = fitOf(it); if (ft) fr.fit = ft; nPh++; }
         recs[pi_].push({ fr: fr, item: it });
       }
       for (var q4 = 0; q4 < pages.length; q4++) {
