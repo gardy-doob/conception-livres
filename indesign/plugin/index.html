@@ -21,7 +21,7 @@
   .tabs { display: flex; gap: 14px; border-bottom: 1px solid rgba(128,128,128,.35); margin: 0 -12px 12px; padding: 0 12px; }
   .tab { border: 0; background: transparent; color: inherit; opacity: .65; padding: 8px 0 9px; font-size: 13px; cursor: pointer; border-bottom: 2px solid transparent; display: inline-flex; align-items: center; gap: 5px; }
   .tab.on { opacity: 1; font-weight: 600; border-bottom-color: #C2477A; }
-  .badge { font-size: 10px; font-weight: 700; background: rgba(128,128,128,.35); border-radius: 999px; padding: 0 6px; line-height: 16px; }
+  .badge { font-size: 10px; font-weight: 700; background: rgba(128,128,128,.35); border-radius: 8px; padding: 0 6px; line-height: 16px; }
   .badge.warn { background: #F2B657; color: #2a1d00; }
   .card { border: 1px solid rgba(128,128,128,.35); border-radius: 10px; padding: 12px; margin: 0 0 10px; }
   .card.warn { border-color: rgba(242,182,87,.7); background: rgba(242,182,87,.08); }
@@ -29,13 +29,13 @@
   .eyebrow { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; opacity: .6; margin-bottom: 4px; }
   h2 { font-size: 17px; margin: 2px 0 2px; font-weight: 700; }
   .state { display: flex; gap: 10px; align-items: flex-start; margin: 12px 0 10px; }
-  .state .ic { flex: none; width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }
+  .state .ic { flex: none; width: 24px; height: 24px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; }
   .state.ok .ic { background: rgba(124,203,152,.22); color: #7CCB98; } .state.ok b { color: #9fdcb3; }
   .state.live .ic { background: rgba(83,195,221,.22); color: #53C3DD; } .state.live b { color: #7fd6ea; }
   .state b { font-size: 13px; } .state p { margin: 2px 0 0; opacity: .7; }
   .kv { display: flex; justify-content: space-between; gap: 8px; padding: 7px 0; border-top: 1px solid rgba(128,128,128,.2); }
   .kv span { opacity: .7; }
-  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 12px; font-size: 12px; border-radius: 999px; border: 1px solid rgba(128,128,128,.6); background: transparent; color: inherit; cursor: pointer; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 12px; font-size: 12px; border-radius: 6px; border: 1px solid rgba(128,128,128,.6); background: transparent; color: inherit; cursor: pointer; }
   .btn:hover { border-color: rgba(200,200,200,.9); }
   .btn.primary { background: #f0f0f0; border-color: #f0f0f0; color: #1d1d1d; font-weight: 600; }
   .btn.block { display: flex; width: 100%; margin: 0 0 8px; padding: 9px 12px; font-size: 13px; }
@@ -49,8 +49,8 @@
   input, select { width: 100%; box-sizing: border-box; padding: 6px 8px; font-size: 12px; }
   .row2 { display: flex; gap: 8px; } .row2 > div { flex: 1; }
   .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
-  .seg { display: flex; border: 1px solid rgba(128,128,128,.5); border-radius: 999px; padding: 2px; margin-bottom: 12px; }
-  .seg button { flex: 1; border: 0; background: transparent; color: inherit; padding: 6px 8px; border-radius: 999px; cursor: pointer; font-size: 12px; opacity: .75; }
+  .seg { display: flex; border: 1px solid rgba(128,128,128,.5); border-radius: 8px; padding: 2px; margin-bottom: 12px; }
+  .seg button { flex: 1; border: 0; background: transparent; color: inherit; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 12px; opacity: .75; }
   .seg button.on { background: #f0f0f0; color: #1d1d1d; opacity: 1; font-weight: 600; }
   .newbook { border-left: 2px solid #C2477A; padding-left: 10px; margin: 8px 0 4px; }
   .addrow { display: flex; gap: 6px; align-items: center; margin-top: 8px; } .addrow .pg { width: 46px; flex: none; }
