@@ -42,7 +42,15 @@
     }
     function forgetKey(d) { const id = safe(() => d.id, null); if (id != null) keyCache.delete(id); }
     function activeDoc() { return safe(() => app.documents.length ? app.activeDocument : null, null); }
-    function openDocKeys() { return els(app.documents).map(docKey); }
+    function openDocKeys() { let ds; try { const c = app.documents; const n = c.length; ds = els(c); if (ds.length !== n) return null; } catch (e) { return null; } return ds.map(docKey); }
+    // Open documents as InDesign sees them, for the diagnostic
+    function diagDocs() {
+      const act = activeDoc();
+      return els(app.documents).map(d => ({ name: docName(d), key: docKey(d), active: d === act || safe(() => d.id === act.id, false), modified: isModified(d), pages: safe(() => d.pages.length, null),
+        doc: readDocLabel(d), book: readBinding(d), converted: safe(() => d.converted, null),
+        links: safe(() => { const ls = els(d.links); const bad = ls.filter(l => !eq(safe(() => l.status, null), (E.LinkStatus || {}).NORMAL)); return { n: ls.length, notOk: bad.length, sample: bad.slice(0, 5).map(l => safe(() => String(l.name), '') + ' : ' + safe(() => String(l.status), '')) }; }, null),
+        fonts: safe(() => { const fs = els(d.fonts); const bad = fs.filter(f => !eq(safe(() => f.status, null), (E.FontStatus || {}).INSTALLED)); return { n: fs.length, notInstalled: bad.slice(0, 10).map(f => safe(() => String(f.name), '')) }; }, null) }));
+    }
     const isModified = d => !!safe(() => d.modified, false);
     const docName = d => String(safe(() => d.name, '')).replace(/\.indd$/i, '');
     function readBinding(d) { try { const s = d.extractLabel('mb-book'); return s ? JSON.parse(s) : null; } catch (e) { return null; } }
@@ -60,6 +68,7 @@
     }
     // A dialog or an alert is open in InDesign: the document cannot be read or exported until it closes
     function modal() { return !!safe(() => app.modalState, false); }
+    const hostInfo = () => ({ indesign: safe(() => String(app.version), ''), locale: safe(() => String(app.locale), ''), os: safe(() => uxp.host && uxp.host.os || (require('os').platform && require('os').platform()), ''), uxp: safe(() => uxp.versions && uxp.versions.uxp, ''), plugin: safe(() => uxp.versions && uxp.versions.plugin, '') });
     function activePage(d) { return safe(() => String(app.activeWindow.activePage.name), ''); }
 
     // ---------- geometry (spread coordinates, points) ----------
@@ -484,7 +493,7 @@
       if (i < u8.length) { const n = (u8[i] << 16) | ((i + 1 < u8.length ? u8[i + 1] : 0) << 8); s += A[n >> 18 & 63] + A[n >> 12 & 63] + (i + 1 < u8.length ? A[n >> 6 & 63] : '=') + '='; }
       return s;
     }
-    return { modal, activeDoc, openDocKeys, docKey, refreshKeys, forgetKey, thash, isModified, docName, readBinding, writeBinding, clearBinding, readDocLabel, writeDocLabel, clearLegacy, findOpenDoc, bringToFront, openDoc, toggleKind, pickAndPlace, pageCount: d => els(d.pages).length, activePage, readBlocks, writeBlock, selectionBid, readStructure, exportPreview, relPath, b64 };
+    return { hostInfo, modal, diagDocs, activeDoc, openDocKeys, docKey, refreshKeys, forgetKey, thash, isModified, docName, readBinding, writeBinding, clearBinding, readDocLabel, writeDocLabel, clearLegacy, findOpenDoc, bringToFront, openDoc, toggleKind, pickAndPlace, pageCount: d => els(d.pages).length, activePage, readBlocks, writeBlock, selectionBid, readStructure, exportPreview, relPath, b64 };
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = { makeDom }; else root.MBDom = { makeDom };
 })(typeof window !== 'undefined' ? window : globalThis);

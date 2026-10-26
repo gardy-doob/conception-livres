@@ -46,7 +46,18 @@
       this.selBid = null; this.lockBid = null; this.lockAt = 0; this.busy = false; this.since = '';
       this.textCache = {}; this.deferred = new Set(); this.lastActivity = 0; this.queued = new Set(); this.queuedFull = false;
     }
-    say(msg) { this.log.unshift({ t: this.now(), msg }); this.log.length = Math.min(this.log.length, 40); this.onChange(); }
+    say(msg) { this.log.unshift({ t: this.now(), msg }); this.log.length = Math.min(this.log.length, 40); this.trace('say', msg); this.onChange(); }
+    // Detailed trace for the diagnostic (« Exporter un diagnostic… »): the last 800 events, never shown in the panel
+    trace(k, d) { const e = { t: this.now(), k }; if (d !== undefined) e.d = d; const tr = this.tr || (this.tr = []); tr.push(e); if (tr.length > 800) tr.splice(0, tr.length - 800); }
+    traceErr(where, e) { this.trace('error', { where, msg: String(e && e.message || e), stack: String(e && e.stack || '').split('\n').slice(0, 6).join(' | ') }); }
+    // A long operation (link, resync, start of création…) runs on a given document: the clock does nothing meanwhile,
+    // even if another document is opened or brought to the front (it is taken into account once the operation is over)
+    async runJob(name, fn) {
+      if (this.job) { this.trace('job-refused', { name, running: this.job.name }); throw new Error('une opération est déjà en cours (' + this.job.name + '), réessayez dans un instant'); }
+      this.job = { name, doc: this.docKey, at: this.now() }; this.trace('job-start', this.job);
+      try { return await fn(); } catch (e) { this.traceErr('job ' + name, e); throw e; }
+      finally { this.trace('job-end', { name, ms: this.now() - this.job.at }); this.job = null; this.onChange(); }
+    }
     key() { return this.bind ? 'mb:' + this.bind.owner + ':' + this.bind.book : ''; }
     loadState() {
       let s = null; try { s = JSON.parse(this.store.getItem(this.key()) || 'null'); } catch (e) {}
@@ -62,6 +73,7 @@
     // Each file carries its own identifier (label 'mb-doc'); the list of links lives online (project_docs), with the
     // place of the file on disk. A file found elsewhere than its recorded place is a copy (or a move) and waits for a choice.
     async activate(doc) {
+      this.trace('activate', this.dom.docName(doc));
       this.unbindLocal(); this.retryAt = 0;
       if (this.dom.refreshKeys) await this.dom.refreshKeys(false);
       this.docKey = this.dom.docKey(doc);
@@ -219,7 +231,7 @@
     async panelBeat() {
       try { await this.api.presence({ owner: this.me.id, book_id: '_panel', sid: this.sid, client: 'indesign', name: this.me.name, doc: (() => { const d = this.dom.activeDoc(); return d ? this.dom.docName(d) : null; })(), page: null, bid: null, active: true }); } catch (e) {}
     }
-    unbindLocal() { this.pending = null; this.link = null; this.inCreation = false; this.todos = []; this.bind = null; this.st = null; this.rows = new Map(); this.conflicts.clear(); this.waiting.clear(); this.since = ''; this.lockBid = null; this.selBid = null; this.textCache = {}; }
+    unbindLocal() { if (this.bind || this.link) this.trace('unbind', { book: this.bind && this.bind.book, doc: this.docKey, from: String(new Error().stack || '').split('\n').slice(2, 5).map(x => x.trim()).join(' < ') }); this.pending = null; this.link = null; this.inCreation = false; this.todos = []; this.bind = null; this.st = null; this.rows = new Map(); this.conflicts.clear(); this.waiting.clear(); this.since = ''; this.lockBid = null; this.selBid = null; this.textCache = {}; }
     async fetchAll() { const rows = await this.api.blocks(this.bind.owner, this.bind.book); this.rows = new Map(rows.map(r => [r.bid, r])); this.since = rows.reduce((m, r) => r.updated_at > m ? r.updated_at : m, ''); }
     async fetchChanged() {
       const rows = await this.api.blocks(this.bind.owner, this.bind.book, this.since);
@@ -236,14 +248,14 @@
     async sync(doc, opt) {
       if (!this.bind) return;
       if (this.busy) { if (opt.only) opt.only.forEach(b => this.queued.add(b)); else this.queuedFull = this.queuedFull || !!opt.full || 'scan'; return; }
-      this.busy = true;
+      this.busy = true; const t0 = this.now(); this.trace('sync', { full: !!opt.full, only: opt.only ? opt.only.length : 0, doc: this.docKey });
       const mod = this.dom.isModified(doc);
       try {
         const blocks = this.dom.readBlocks(doc, { full: !!opt.full, cache: this.textCache, only: opt.only, root: this.book });
         const bind0 = this.bind;
         for (const blk of blocks) { if (!this.st || this.bind !== bind0) break; await this.syncBlock(doc, blk, mod, opt); }
-        this.saveState(); this.lastSync = this.now();
-      } finally { this.busy = false; }
+        this.saveState(); this.lastSync = this.now(); this.trace('sync-end', { blocks: blocks.length, ms: this.now() - t0 });
+      } catch (e) { this.traceErr('sync', e); throw e; } finally { this.busy = false; }
       this.onChange();
       if (this.queued.size) { const only = [...this.queued]; this.queued.clear(); await this.sync(doc, { only, noPush: opt.noPush }); }
       if (this.queuedFull) { const f = this.queuedFull === true; this.queuedFull = false; await this.sync(doc, { full: f }); }
@@ -331,6 +343,7 @@
     async publishStructure(doc, opt) {
       const s = this.dom.readStructure(doc, this.book); const pagesSt = this.st.pages || (this.st.pages = {});
       const changed = s.pages.filter(pg => opt.force || !pagesSt[pg.n] || pagesSt[pg.n].sig !== pg.sig);
+      const tp = this.now(); this.trace('structure', { pages: s.pages.length, changed: changed.length, force: !!opt.force, doc: this.dom.docName(doc) });
       const known = Object.keys(pagesSt).length;
       if (!changed.length && known === s.pages.length) { s.pages.forEach(pg => { pg.img = pagesSt[pg.n].img; pg.bg = pagesSt[pg.n].bg || ''; }); return false; }
       let i = 0, paused = false; const fails = this.previewFails || (this.previewFails = {});
@@ -345,12 +358,14 @@
           pagesSt[pg.n] = { sig: pg.sig, img: key, bg: key + '-f' }; delete fails[pg.n];
         }
         catch (e) {
+          this.trace('preview-fail', { page: pg.n, modal: isModal(e), msg: String(e && e.message || e), active: this.dom.docName(this.dom.activeDoc() || {}) });
           if (isModal(e)) { paused = true; continue; }
           // tried again at the next pass; given up (old preview kept) after 3 failures
           fails[pg.n] = (fails[pg.n] || 0) + 1;
           if (fails[pg.n] >= 3) { this.say('Aperçu de la page ' + pg.n + ' impossible : ' + e.message); const o = pagesSt[pg.n] || {}; pagesSt[pg.n] = { sig: pg.sig, img: o.img || '', bg: o.bg || '' }; delete fails[pg.n]; }
         }
       }
+      this.trace('structure-end', { ms: this.now() - tp, paused });
       if (paused) this.say('Une boîte de dialogue est ouverte dans InDesign : aperçus des pages en attente, ils seront faits après sa fermeture.', true);
       if (!this.st) return false;
       for (const n of Object.keys(pagesSt)) if (!s.pages.some(pg => String(pg.n) === n)) delete pagesSt[n];
@@ -416,23 +431,43 @@
     async unlock() { if (!this.lockBid || !this.bind) return; const bid = this.lockBid; this.lockBid = null; try { await this.api.rpc('block_unlock', { p_owner: this.bind.owner, p_book: this.bind.book, p_sid: this.sid, p_bid: bid }); } catch (e) {} }
 
     // ---------- the clock: called every 1.5 s by the panel ----------
+    // Everything useful to understand a problem, in one file
+    diagnostic(extra) {
+      const safe = f => { try { return f(); } catch (e) { return 'erreur : ' + e.message; } };
+      const st = this.st;
+      return Object.assign({
+        at: new Date(this.now()).toISOString(), me: this.me && this.me.email, sid: this.sid,
+        docKey: this.docKey, bind: this.bind, link: this.link, pending: this.pending && { why: this.pending.why || this.pending.kind || '', book: this.pending.book && this.pending.book.title },
+        job: this.job, busy: this.busy, ticking: this.ticking, inCreation: this.inCreation, live: this.live, modal: safe(() => this.dom.modal && this.dom.modal()),
+        others: this.others, lockBid: this.lockBid, selBid: this.selBid, lastSync: this.lastSync ? new Date(this.lastSync).toISOString() : null,
+        conflicts: [...this.conflicts.keys()], waiting: [...this.waiting.keys()], deferred: [...this.deferred], queued: [...this.queued], queuedFull: this.queuedFull,
+        state: st ? { pages: Object.keys(st.pages || {}).length, pagesNoImg: Object.entries(st.pages || {}).filter(([, v]) => !v.img).map(([k]) => +k), base: Object.keys(st.base || {}).length, pushed: Object.keys(st.pushed || {}), applied: Object.keys(st.applied || {}) } : null,
+        previewFails: this.previewFails || {}, rows: this.rows.size,
+        documents: safe(() => this.dom.diagDocs ? this.dom.diagDocs() : this.dom.openDocKeys()),
+        log: this.log, trace: this.tr || []
+      }, extra || {});
+    }
     async tick() {
       if (this.ticking) return; this.ticking = true;
-      try { await this._tick(); } catch (e) { this.say('Erreur : ' + e.message); } finally { this.ticking = false; }
+      try { await this._tick(); } catch (e) { this.traceErr('tick', e); this.say('Erreur : ' + e.message); } finally { this.ticking = false; }
     }
     async _tick() {
       const now = this.now();
       // A dialog or an alert is open in InDesign: nothing can be read or exported, everything waits until it is closed
-      if (this.dom.modal && this.dom.modal()) { if (!this.modalSaid) { this.modalSaid = true; this.say('Une boîte de dialogue est ouverte dans InDesign : synchronisation en pause jusqu\'à sa fermeture.', true); } return; }
+      if (this.job) { if (!this.jobSaid) { this.jobSaid = true; this.trace('tick-wait-job', this.job.name); } return; }
+      this.jobSaid = false;
+      if (this.dom.modal && this.dom.modal()) { if (!this.modalSaid) { this.trace('modal-on'); this.modalSaid = true; this.say('Une boîte de dialogue est ouverte dans InDesign : synchronisation en pause jusqu\'à sa fermeture.', true); } return; }
+      if (this.modalSaid) this.trace('modal-off');
       this.modalSaid = false;
       if (this.dom.refreshKeys) { const all = now - (this.t.keys || 0) > 10000; if (all) this.t.keys = now; await this.dom.refreshKeys(all); }
       if (now - (this.t.req || 0) > 6000) { this.t.req = now; await this.handleOpenRequests(); }
       if (now - (this.t.panel || 0) > 20000) { this.t.panel = now; await this.panelBeat(); }
       const docs = this.dom.openDocKeys();
-      if (this.docKey && !docs.includes(this.docKey)) { await this.onClosed(this.wasModified); }
+      if (!docs) { this.trace('docs-unreadable'); return; }   // InDesign does not answer: never taken for « document closed »
+      if (this.docKey && !docs.includes(this.docKey)) { this.trace('closed', { doc: this.docKey, open: docs, modified: this.wasModified }); await this.onClosed(this.wasModified); }
       const doc = this.dom.activeDoc();
       if (!doc) return;
-      if (this.dom.docKey(doc) !== this.docKey) { await this.activate(doc); return; }
+      if (this.dom.docKey(doc) !== this.docKey) { this.trace('switch', { from: this.docKey, to: this.dom.docKey(doc), open: docs }); await this.activate(doc); return; }
       if (this.retryAt && now > this.retryAt) { await this.activate(doc); return; }
       if (this.link && now - (this.t.todo || 0) > 20000) await this.loadTodos();
       if (!this.bind) return;

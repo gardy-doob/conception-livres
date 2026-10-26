@@ -150,6 +150,7 @@
       ${engine.me ? `<button class="iconbtn" id="menu" aria-label="Menu" aria-expanded="${ui.menu}">${I.more}</button>` : ''}</header>
       ${ui.menu && engine.me ? `<div class="menu"><div class="muted small">${esc(engine.me.email)}</div>
         <button class="mitem" id="pick">Placer une photo…</button><p class="hint" style="margin:0 8px 6px">Pour une photo refusée par InDesign (WhatsApp) : sélectionnez le bloc, choisissez la photo, le panneau la convertit si besoin.</p>
+        <button class="mitem" id="diag">Exporter un diagnostic…</button><p class="hint" style="margin:0 8px 6px">Un fichier qui décrit l'état du panneau, des documents ouverts et ce qui s'est passé récemment : à envoyer en cas de problème.</p>
         <button class="mitem" id="out">Se déconnecter</button></div>` : ''}`;
   }
 
@@ -179,12 +180,23 @@
     if (/^(td-text|td-page|nb-title|nb-year|nb-pages)$/.test(focus || '')) { const f = $(focus); if (f) { f.value = keep || ''; f.focus(); } }
   }
 
+  // Diagnostic file: panel and InDesign versions, open documents (links, fonts, labels), engine state, journal and detailed trace
+  async function exportDiagnostic() {
+    const data = engine.diagnostic({ host: dom.hostInfo ? dom.hostInfo() : null, ui: { tab: ui.tab, progress: ui.progress, err: ui.err, role: ui.role, forDoc: ui.forDoc } });
+    const txt = JSON.stringify(data, null, 1);
+    const d = new Date(); const p2 = n => String(n).padStart(2, '0');
+    const name = 'moodbook-diagnostic-' + d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) + '-' + p2(d.getHours()) + p2(d.getMinutes()) + '.json';
+    let f = null; try { f = await uxp.storage.localFileSystem.getFileForSaving(name, { types: ['json'] }); } catch (e) { f = null; }
+    if (!f) { engine.say('Diagnostic non enregistré (aucun fichier choisi).'); return; }
+    await f.write(txt); engine.say('Diagnostic enregistré : ' + (f.name || name) + ' (' + Math.round(txt.length / 1024) + ' Ko). Envoyez ce fichier pour l\'analyse.');
+  }
   document.addEventListener('click', async e => {
     const t = e.target.closest ? e.target.closest('button') : e.target; if (!t || t.tagName !== 'BUTTON') { if (ui.menu) { ui.menu = false; render(); } return; }
     const doc = dom.activeDoc();
     if (ui.menu && t.id !== 'menu') ui.menu = false;
-    try {
+    const run = async () => {
       if (t.id === 'menu') { ui.menu = !ui.menu; render(); }
+      else if (t.id === 'diag') { await exportDiagnostic(); }
       else if (t.id === 'login') {
         ui.err = ''; const em = $('em').value.trim(), pw = $('pw').value; ui.email = em; store.setItem('mb-email', em);
         engine.me = await api.login(em, pw); render(); loadBooks();
@@ -225,7 +237,14 @@
       else if (t.id === 'all-site') await engine.resolveAll('site');
       else if (t.id === 'all-mine') await engine.resolveAll('mine');
       else if (t.dataset && t.dataset.res) await engine.resolve(t.dataset.bid, t.dataset.res);
-    } catch (err) { ui.err = err.message; ui.progress = ''; engine.say('Erreur : ' + err.message); render(); }
+    };
+    // Long operations on a document: one at a time, the clock waits (see engine.runJob)
+    const JOBS = { link: 'liaison', go: 'passage en création', unlink: 'détachement', fix: 'resynchronisation', now: 'synchronisation', 'all-site': 'résolution', 'all-mine': 'résolution' };
+    const jn = JOBS[t.id] || (t.dataset && (t.dataset.ch ? 'choix du fichier' : t.dataset.res ? 'résolution' : '')) || '';
+    try {
+      engine.trace('click', t.id || (t.dataset && JSON.stringify(t.dataset)) || t.textContent.slice(0, 30));
+      if (jn) await engine.runJob(jn, run); else await run();
+    } catch (err) { engine.traceErr('clic ' + (t.id || ''), err); ui.err = err.message; ui.progress = ''; engine.say('Erreur : ' + err.message); render(); }
   });
   document.addEventListener('change', e => {
     if (e.target.id === 'bk') { ui.bookSel = e.target.value; ui.err = ''; render(); }
