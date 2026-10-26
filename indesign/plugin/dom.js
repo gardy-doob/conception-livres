@@ -58,6 +58,8 @@
       if (lfs && lfs.getEntryWithUrl) { for (const u of ['file:' + path, path]) { try { entry = await lfs.getEntryWithUrl(u); if (entry) break; } catch (e) {} } }
       try { return app.open(entry || path); } catch (e) { if (entry) return app.open(path); throw e; }
     }
+    // A dialog or an alert is open in InDesign: the document cannot be read or exported until it closes
+    function modal() { return !!safe(() => app.modalState, false); }
     function activePage(d) { return safe(() => String(app.activeWindow.activePage.name), ''); }
 
     // ---------- geometry (spread coordinates, points) ----------
@@ -482,7 +484,7 @@
       if (i < u8.length) { const n = (u8[i] << 16) | ((i + 1 < u8.length ? u8[i + 1] : 0) << 8); s += A[n >> 18 & 63] + A[n >> 12 & 63] + (i + 1 < u8.length ? A[n >> 6 & 63] : '=') + '='; }
       return s;
     }
-    return { activeDoc, openDocKeys, docKey, refreshKeys, forgetKey, thash, isModified, docName, readBinding, writeBinding, clearBinding, readDocLabel, writeDocLabel, clearLegacy, findOpenDoc, bringToFront, openDoc, toggleKind, pickAndPlace, pageCount: d => els(d.pages).length, activePage, readBlocks, writeBlock, selectionBid, readStructure, exportPreview, relPath, b64 };
+    return { modal, activeDoc, openDocKeys, docKey, refreshKeys, forgetKey, thash, isModified, docName, readBinding, writeBinding, clearBinding, readDocLabel, writeDocLabel, clearLegacy, findOpenDoc, bringToFront, openDoc, toggleKind, pickAndPlace, pageCount: d => els(d.pages).length, activePage, readBlocks, writeBlock, selectionBid, readStructure, exportPreview, relPath, b64 };
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = { makeDom }; else root.MBDom = { makeDom };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -240,7 +240,8 @@
       const mod = this.dom.isModified(doc);
       try {
         const blocks = this.dom.readBlocks(doc, { full: !!opt.full, cache: this.textCache, only: opt.only, root: this.book });
-        for (const blk of blocks) await this.syncBlock(doc, blk, mod, opt);
+        const bind0 = this.bind;
+        for (const blk of blocks) { if (!this.st || this.bind !== bind0) break; await this.syncBlock(doc, blk, mod, opt); }
         this.saveState(); this.lastSync = this.now();
       } finally { this.busy = false; }
       this.onChange();
@@ -248,7 +249,7 @@
       if (this.queuedFull) { const f = this.queuedFull === true; this.queuedFull = false; await this.sync(doc, { full: f }); }
     }
     async syncBlock(doc, blk, mod, opt) {
-      const { bid, kind } = blk; const row = this.rows.get(bid); const st = this.st;
+      const { bid, kind } = blk; const row = this.rows.get(bid); const st = this.st; if (!st) return;   // document detached meanwhile
       const h = hash(kind, blk.data); const live = row && !row.deleted; const siteH = live ? hash(kind, row.data) : null; const b0 = st.base[bid];
       if (siteH === h) { st.base[bid] = { dh: h, rev: row.rev }; this.conflicts.delete(bid); this.waiting.delete(bid); return; }
       let action;
@@ -272,6 +273,7 @@
       const res = await this.api.rpc('block_save', { p_owner: this.bind.owner, p_book: this.bind.book, p_bid: bid, p_kind: blk.kind, p_page: blk.page,
         p_data: blk.kind === 'ph' ? { p: blk.data.p || null, ln: blk.data.ln || null } : { paras: blk.data.paras }, p_rev: row && !row.deleted ? row.rev : (row ? -1 : 0),
         p_src: 'id', p_committed: !mod, p_sid: this.sid, p_name: this.me.name });
+      if (!this.st) return;
       if (res && res.row) this.rows.set(bid, res.row);
       if (res && res.ok) {
         this.st.base[bid] = { dh: h, rev: res.row.rev }; this.waiting.delete(bid); this.conflicts.delete(bid);
@@ -292,6 +294,7 @@
       }
       catch (e) { this.say('Impossible d\'appliquer ' + this.label(blk) + ' : ' + e.message); return; }
       // Remember the text as InDesign reads it back (not as the site sent it)
+      if (!this.st) return;
       let dh = hash(blk.kind, row.data);
       try { const back = this.dom.readBlocks(doc, { only: [bid], cache: this.textCache, root: this.book })[0]; if (back) dh = hash(blk.kind, back.data); } catch (e) {}
       this.st.base[bid] = { dh, rev: row.rev };
@@ -330,17 +333,26 @@
       const changed = s.pages.filter(pg => opt.force || !pagesSt[pg.n] || pagesSt[pg.n].sig !== pg.sig);
       const known = Object.keys(pagesSt).length;
       if (!changed.length && known === s.pages.length) { s.pages.forEach(pg => { pg.img = pagesSt[pg.n].img; pg.bg = pagesSt[pg.n].bg || ''; }); return false; }
-      let i = 0;
+      let i = 0, paused = false; const fails = this.previewFails || (this.previewFails = {});
+      const isModal = e => /modal|bo[iî]te de dialogue|alert/i.test(String(e && e.message || e));
       for (const pg of changed) {
         i++; if (opt.progress) opt.progress('Aperçu des pages ' + i + '/' + changed.length + '…');
+        if (paused || (this.dom.modal && this.dom.modal())) { paused = true; continue; }   // a dialog is open: these pages are done later
         try {
           const key = 'p' + pg.n + '-' + pg.sig;
           await this.api.putImage(this.bind.owner, this.bind.book, key, await this.dom.exportPreview(doc, pg, true));      // the page as printed
           await this.api.putImage(this.bind.owner, this.bind.book, key + '-f', await this.dom.exportPreview(doc, pg, false)); // without its texts
-          pagesSt[pg.n] = { sig: pg.sig, img: key, bg: key + '-f' };
+          pagesSt[pg.n] = { sig: pg.sig, img: key, bg: key + '-f' }; delete fails[pg.n];
         }
-        catch (e) { this.say('Aperçu de la page ' + pg.n + ' impossible : ' + e.message); const o = pagesSt[pg.n] || {}; pagesSt[pg.n] = { sig: pg.sig, img: o.img || '', bg: o.bg || '' }; }
+        catch (e) {
+          if (isModal(e)) { paused = true; continue; }
+          // tried again at the next pass; given up (old preview kept) after 3 failures
+          fails[pg.n] = (fails[pg.n] || 0) + 1;
+          if (fails[pg.n] >= 3) { this.say('Aperçu de la page ' + pg.n + ' impossible : ' + e.message); const o = pagesSt[pg.n] || {}; pagesSt[pg.n] = { sig: pg.sig, img: o.img || '', bg: o.bg || '' }; delete fails[pg.n]; }
+        }
       }
+      if (paused) this.say('Une boîte de dialogue est ouverte dans InDesign : aperçus des pages en attente, ils seront faits après sa fermeture.', true);
+      if (!this.st) return false;
       for (const n of Object.keys(pagesSt)) if (!s.pages.some(pg => String(pg.n) === n)) delete pagesSt[n];
       s.pages.forEach(pg => { pg.img = (pagesSt[pg.n] || {}).img || ''; pg.bg = (pagesSt[pg.n] || {}).bg || ''; });
       await this.api.saveCreation(this.bind.owner, this.bind.book, { doc: this.dom.docName(doc), at: this.now(), pages: s.pages, stories: s.stories });
@@ -410,6 +422,9 @@
     }
     async _tick() {
       const now = this.now();
+      // A dialog or an alert is open in InDesign: nothing can be read or exported, everything waits until it is closed
+      if (this.dom.modal && this.dom.modal()) { if (!this.modalSaid) { this.modalSaid = true; this.say('Une boîte de dialogue est ouverte dans InDesign : synchronisation en pause jusqu\'à sa fermeture.', true); } return; }
+      this.modalSaid = false;
       if (this.dom.refreshKeys) { const all = now - (this.t.keys || 0) > 10000; if (all) this.t.keys = now; await this.dom.refreshKeys(all); }
       if (now - (this.t.req || 0) > 6000) { this.t.req = now; await this.handleOpenRequests(); }
       if (now - (this.t.panel || 0) > 20000) { this.t.panel = now; await this.panelBeat(); }
