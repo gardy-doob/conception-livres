@@ -182,7 +182,7 @@
 
   // Diagnostic file: panel and InDesign versions, open documents (links, fonts, labels), engine state, journal and detailed trace
   async function exportDiagnostic() {
-    const data = engine.diagnostic({ host: dom.hostInfo ? dom.hostInfo() : null, ui: { tab: ui.tab, progress: ui.progress, err: ui.err, role: ui.role, forDoc: ui.forDoc } });
+    const data = engine.diagnostic({ host: dom.hostInfo ? dom.hostInfo() : null, ui: { tab: ui.tab, progress: ui.progress, err: ui.err, role: ui.role, forDoc: ui.forDoc }, previousSession: prevSession });
     const txt = JSON.stringify(data, null, 1);
     const d = new Date(); const p2 = n => String(n).padStart(2, '0');
     const name = 'moodbook-diagnostic-' + d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) + '-' + p2(d.getHours()) + p2(d.getMinutes()) + '.json';
@@ -264,7 +264,25 @@
     render();
   }
 
+  // The trace is also kept on disk (panel data folder), written every 10 s: if InDesign closes or crashes, the diagnostic
+  // exported after restarting still shows what the panel was doing just before (« previousSession »)
+  let traceFile = null, traceSaved = 0, prevSession = null;
+  async function traceInit() {
+    try {
+      const dir = await uxp.storage.localFileSystem.getDataFolder();
+      try { const old = await dir.getEntry('moodbook-trace.json'); prevSession = JSON.parse(await old.read()); } catch (e) { prevSession = null; }
+      traceFile = await dir.createFile('moodbook-trace.json', { overwrite: true });
+      engine.trace('panel-start', { previous: prevSession ? { at: prevSession.at, last: prevSession.trace && prevSession.trace.length ? prevSession.trace[prevSession.trace.length - 1] : null } : null });
+    } catch (e) { traceFile = null; }
+  }
+  async function traceFlush() {
+    const tr = engine.tr || []; if (!traceFile || !tr.length || tr[tr.length - 1].t === traceSaved) return;
+    traceSaved = tr[tr.length - 1].t;
+    try { await traceFile.write(JSON.stringify({ at: new Date().toISOString(), docKey: engine.docKey, bind: engine.bind, job: engine.job, trace: tr.slice(-400) })); } catch (e) { /* disk full or locked: next time */ }
+  }
   async function start() {
+    await traceInit();
+    setInterval(traceFlush, 10000);
     engine.me = await api.check(); render();
     if (engine.me) loadBooks();
     setInterval(() => { if (engine.me) engine.tick(); }, 1500);
