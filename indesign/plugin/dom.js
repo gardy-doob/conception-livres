@@ -470,20 +470,35 @@
       return { pages, stories: storiesOut };
     }
     // Page preview (photos and decoration, without the text frames that the site draws itself)
+    // Page preview. The version without text hides the text frames for the time of the export: done in one step that does not
+    // appear in « Édition › Annuler » (AUTO_UNDO), and a document that was saved before stays saved (it is saved again,
+    // identical, right after the frames are shown again), so the panel never leaves the document « modified ».
     async function exportPreview(d, pg, withText) {
-      const page = d.pages.item(pg.n - 1); const hidden = [];
-      if (!withText) for (const it of els(page.allPageItems)) if (cn(it) === 'TextFrame' && safe(() => it.visible, false)) { safe(() => { it.visible = false; hidden.push(it); }); }
       const jp = app.jpegExportPreferences; const keys = ['exportingSpread', 'jpegExportRange', 'pageString', 'jpegQuality', 'exportResolution', 'jpegColorSpace', 'antiAlias']; const saved = {};
       keys.forEach(k => { saved[k] = safe(() => jp[k], undefined); });
       const lfs = uxp.storage.localFileSystem; const tmp = await lfs.getTemporaryFolder(); const name = 'mb-page-' + pg.n + (withText ? '' : '-fond') + '.jpg';
-      try {
-        jp.exportingSpread = false; jp.jpegExportRange = E.ExportRangeOrAllPages.EXPORT_RANGE; jp.pageString = '+' + pg.n;
-        safe(() => { jp.jpegQuality = E.JPEGOptionsQuality.MEDIUM; }); safe(() => { jp.exportResolution = 60; }); safe(() => { jp.jpegColorSpace = E.JpegColorSpaceEnum.RGB; }); safe(() => { jp.antiAlias = true; });
-        d.exportFile(E.ExportFormat.JPG, tmp.nativePath + '/' + name, false);
-      } finally {
-        hidden.forEach(it => safe(() => { it.visible = true; }));
-        keys.forEach(k => { if (saved[k] !== undefined) safe(() => { jp[k] = saved[k]; }); });
+      const target = tmp.nativePath + '/' + name;
+      const run = () => {
+        const page = d.pages.item(pg.n - 1); const hidden = [];
+        try {
+          if (!withText) for (const it of els(page.allPageItems)) if (cn(it) === 'TextFrame' && safe(() => it.visible, false)) { safe(() => { it.visible = false; hidden.push(it); }); }
+          jp.exportingSpread = false; jp.jpegExportRange = E.ExportRangeOrAllPages.EXPORT_RANGE; jp.pageString = '+' + pg.n;
+          safe(() => { jp.jpegQuality = E.JPEGOptionsQuality.MEDIUM; }); safe(() => { jp.exportResolution = 60; }); safe(() => { jp.jpegColorSpace = E.JpegColorSpaceEnum.RGB; }); safe(() => { jp.antiAlias = true; });
+          d.exportFile(E.ExportFormat.JPG, target, false);
+        } finally {
+          hidden.forEach(it => safe(() => { it.visible = true; }));
+          keys.forEach(k => { if (saved[k] !== undefined) safe(() => { jp[k] = saved[k]; }); });
+        }
+        return hidden.length;
+      };
+      const wasClean = !isModified(d) && safe(() => d.saved, false) === true && !safe(() => d.converted, false);
+      let done = false, nHidden = 0;
+      if (!withText && app.doScript && E.ScriptLanguage && E.UndoModes) {
+        try { nHidden = app.doScript(run, E.ScriptLanguage.UXPSCRIPT, [], E.UndoModes.AUTO_UNDO); done = true; } catch (e) { if (/modal|dialog|alert/i.test(String(e && e.message))) throw e; done = false; }
       }
+      if (!done) nHidden = run();
+      // shown again exactly as before: a document that was saved stays saved
+      if (!withText && wasClean && isModified(d)) safe(() => { d.save(); });
       const f = await tmp.getEntry(name); const buf = await f.read({ format: uxp.storage.formats.binary });
       return 'data:image/jpeg;base64,' + b64(new Uint8Array(buf));
     }
