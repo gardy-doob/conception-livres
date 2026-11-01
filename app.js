@@ -216,7 +216,7 @@ async function cloudFlush(id){
 }
 function cloudFlushAll(){for(const id of CLOUD.pending.keys())cloudFlush(id)}
 window.addEventListener('online',()=>{cloudFlushAll();cloudStatus()});window.addEventListener('offline',cloudStatus);
-async function cloudPutCapture(key,data){if(!cloudOn())return;try{await CLOUD.sb.from('layout_images').upsert({key,data})}catch(e){}}
+async function cloudPutCapture(key,data){if(!cloudOn()||String(key).startsWith('cr~'))return;if(CAPQ.known)CAPQ.known.add(key);try{await CLOUD.sb.from('layout_images').upsert({key,data})}catch(e){}}
 async function cloudPutVersion(v){if(!cloudOn())return;try{await CLOUD.sb.from('book_versions').upsert({key:v.key,book_id:v.id,t:v.t,label:v.label||'',auto:!!v.auto,data:v.data})}catch(e){}}
 async function cloudDelVersion(key){if(!cloudOn())return;try{await CLOUD.sb.from('book_versions').delete().eq('key',key)}catch(e){}}
 async function selectAll(table,cols){const out=[];for(let from=0;;from+=500){const {data,error}=await CLOUD.sb.from(table).select(cols).range(from,from+499);if(error)throw error;out.push(...data);if(data.length<500)break}return out}
@@ -240,9 +240,10 @@ async function cloudStart(){
       const local=new Map(versions.map(v=>[v.key,v]));
       versions=[...vrows.map(v=>({key:v.key,id:v.book_id,t:+v.t,label:v.label,auto:v.auto,data:(local.get(v.key)||{}).data})),...versions.filter(v=>!known.has(v.key))];
     }catch(e){console.warn('versions',e)}
-    const irows=await selectAll('layout_images','key,data');const ik=new Set(irows.map(r=>r.key));
-    for(const [k,v] of Object.entries(captures))if(!ik.has(k))cloudPutCapture(k,v);
-    irows.forEach(r=>{captures[r.key]=r.data;if(IDB.ok)idbPut('cap:'+r.key,r.data).catch(()=>{})});
+    // Layout images: only their names at start (all of them together weigh more than 100 MB); each image is fetched
+    // when a page shows it, then kept in this browser. Previews of the Création phase (cr~…) live in creation_images: never sent here.
+    const irows=await selectAll('layout_images','key');const ik=new Set(irows.map(r=>r.key));CAPQ.known=ik;CAPQ.failed.clear();
+    for(const [k,v] of Object.entries(captures))if(!ik.has(k)&&!k.startsWith('cr~'))cloudPutCapture(k,v);
     if(!CLOUD.channel){
       CLOUD.channel=CLOUD.sb.channel('cdf-'+CLOUD.user.id)
         .on('postgres_changes',{event:'*',schema:'public',table:'books'},pl=>{
@@ -487,7 +488,16 @@ document.addEventListener('focusout',()=>{if(needsRender&&!drag){needsRender=fal
 function loadImg(file){return new Promise((res,rej)=>{const u=URL.createObjectURL(file);const i=new Image();i.onload=()=>{res(i);setTimeout(()=>URL.revokeObjectURL(u),1000)};i.onerror=rej;i.src=u})}
 async function shrink(file,max,q,asBlob){const img=await loadImg(file);const s=Math.min(1,max/img.naturalWidth);const c=document.createElement('canvas');c.width=Math.round(img.naturalWidth*s);c.height=Math.round(img.naturalHeight*s);const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(img,0,0,c.width,c.height);
   if(asBlob)return new Promise(r=>c.toBlob(r,'image/jpeg',q));return c.toDataURL('image/jpeg',q)}
-const imgSrc=c=>!c?'':c.startsWith('cap:')?(captures[c.slice(4)]||''):c;
+const imgSrc=c=>!c?'':c.startsWith('cap:')?(captures[c.slice(4)]||capWant(c.slice(4))):c;
+// Layout images fetched on demand (6 at a time), kept in the browser (IndexedDB)
+const CAPQ={known:null,want:new Set(),failed:new Set(),busy:false,t:0};
+function capWant(k){if(!cloudOn()||!CAPQ.known||!CAPQ.known.has(k)||CAPQ.want.has(k)||CAPQ.failed.has(k))return '';CAPQ.want.add(k);clearTimeout(CAPQ.t);CAPQ.t=setTimeout(capPump,20);return ''}
+async function capPump(){if(CAPQ.busy)return;CAPQ.busy=true;
+  try{while(CAPQ.want.size){const part=[...CAPQ.want].slice(0,6);
+    try{const {data,error}=await CLOUD.sb.from('layout_images').select('key,data').in('key',part);if(error)throw error;
+      (data||[]).forEach(r=>{captures[r.key]=r.data;if(IDB.ok)idbPut('cap:'+r.key,r.data).catch(()=>{})})}catch(e){console.warn('images',e)}
+    part.forEach(k=>{CAPQ.want.delete(k);if(!captures[k])CAPQ.failed.add(k)});softRender()}}
+  finally{CAPQ.busy=false}}
 async function storeImage(file,key,max){
   if(assets){const blob=await shrink(file,max,.85,true);const r=await assets.upload(blob);return r.url}
   const data=await shrink(file,Math.min(max,460),.72,false);await putCapture(key,data);return 'cap:'+key}
@@ -1703,7 +1713,7 @@ document.addEventListener('focusout',e=>{if(e.target&&e.target.id==='red-ed'){co
    La structure (pages, blocs, styles) vient du panneau InDesign (table creations). Chaque bloc photo et chaque texte
    est un enregistrement (table blocks) avec une version et un verrou : le site et InDesign écrivent bloc par bloc,
    jamais le livre entier, et une écriture sur une version périmée ou un bloc verrouillé est refusée. */
-const MB_VERSION='202611011748';
+const MB_VERSION='202611011756';
 const IS_ADMIN=()=>((CLOUD.user&&CLOUD.user.email)||'').toLowerCase()==='gardy.eugene@gmail.com';
 function fmtBuild(v){const m=String(v).match(/^(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)/);return m?`${m[3]}/${m[2]} ${m[4]}:${m[5]}`:v}
 function renderVersion(){const el=document.getElementById('ver-slot');if(!el)return;
