@@ -234,9 +234,12 @@ async function cloudStart(){
     for(const [id,r] of remote){if(CLOUD.pending.has(id))continue;takeRemoteBook(id,r.data,r.user_id)}
     if(rows.length)for(const id of [...books.keys()])if(!remote.has(id)&&!CLOUD.pending.has(id))CLOUD.pending.set(id,'put'); // books only on this computer: send them
     savePending();
-    const vrows=await selectAll('book_versions','key,book_id,t,label,auto,data');
-    const known=new Set(vrows.map(v=>v.key));for(const v of versions)if(!known.has(v.key))cloudPutVersion(v);
-    versions=[...vrows.map(v=>({key:v.key,id:v.book_id,t:+v.t,label:v.label,auto:v.auto,data:v.data})),...versions.filter(v=>!known.has(v.key))];
+    // Versions: only their list at start (each one is a whole copy of a book, fetched when it is restored)
+    try{const vrows=await selectAll('book_versions','key,book_id,t,label,auto');
+      const known=new Set(vrows.map(v=>v.key));for(const v of versions)if(!known.has(v.key)&&v.data)cloudPutVersion(v);
+      const local=new Map(versions.map(v=>[v.key,v]));
+      versions=[...vrows.map(v=>({key:v.key,id:v.book_id,t:+v.t,label:v.label,auto:v.auto,data:(local.get(v.key)||{}).data})),...versions.filter(v=>!known.has(v.key))];
+    }catch(e){console.warn('versions',e)}
     const irows=await selectAll('layout_images','key,data');const ik=new Set(irows.map(r=>r.key));
     for(const [k,v] of Object.entries(captures))if(!ik.has(k))cloudPutCapture(k,v);
     irows.forEach(r=>{captures[r.key]=r.data;if(IDB.ok)idbPut('cap:'+r.key,r.data).catch(()=>{})});
@@ -262,7 +265,14 @@ async function cloudStart(){
     }
     await crLoadAll();await pjLoad();
     loaded=true;cloudFlushAll();cloudStatus();render();
-  }catch(e){setSaved('Connexion en ligne impossible · travail local');toast("L'espace en ligne ne répond pas : vous travaillez en local, l'envoi se fera au retour de la connexion.")}
+    CLOUD.down=null;
+  }catch(e){setSaved('Connexion en ligne impossible · travail local');
+    const msg=String((e&&(e.message||e.error_description))||e||'');const code=e&&(e.code||e.status)||'';
+    console.error('moodbook · chargement en ligne',e);
+    CLOUD.down={msg,code,at:Date.now(),n:((CLOUD.down&&CLOUD.down.n)||0)+1};
+    toast("L'espace en ligne ne répond pas : nouvel essai automatique dans 30 secondes.");
+    clearTimeout(CLOUD.retryT);CLOUD.retryT=setTimeout(()=>{if(CLOUD.down)cloudStart()},30000);
+    CLOUD.busy=false;render()}
   CLOUD.busy=false;
 }
 async function cloudInit(){
@@ -384,8 +394,11 @@ function addVersion(id,data,label,auto){
   const autos=versions.filter(x=>x.id===id&&x.auto).sort((a,z)=>z.t-a.t);autos.slice(20).forEach(dropVersion); // keep the 20 latest automatic ones
   renderHistSlot();return v;
 }
-function restoreVersion(key){
-  const v=versions.find(x=>x.key===key);if(!v)return;const curB=books.get(v.id);
+async function restoreVersion(key){
+  const v=versions.find(x=>x.key===key);if(!v)return;
+  if(!v.data&&cloudOn()){toast('Récupération de la version…');try{const {data,error}=await CLOUD.sb.from('book_versions').select('data').eq('key',key).single();if(error)throw error;v.data=data&&data.data}catch(e){toast('Version impossible à récupérer pour le moment.');return}}
+  if(!v.data){toast('Cette version n\'est plus disponible.');return}
+  const curB=books.get(v.id);
   if(curB)addVersion(v.id,strip(curB),'Avant restauration',true);
   const nb=normBook({...clone(v.data),id:v.id});deleted.delete(v.id);books.set(v.id,nb);save(nb);
   const top=hist[hist.length-1];if(top){top.label='Version restaurée : '+(v.label||fmtVer(v.t));top.sealed=true}
@@ -716,7 +729,11 @@ function loadUI(){let u=null;try{u=JSON.parse(sessionStorage.getItem(UI_KEY)||'n
   if(!u)return;if(u.tab)view.tab=u.tab==='events'?'cdf':u.tab;if(u.cdfMode)view.cdfMode=u.cdfMode;if(u.lib)Object.assign(lib,{sort:u.lib.sort||lib.sort,size:u.lib.size||lib.size,sub:u.lib.sub!==false,hideUsed:!!u.lib.hideUsed});
   if(u.rk!=null)view.rk=u.rk;view.rfocus=!!u.rfocus;if(u.pzh)view.pzh=u.pzh;view.plLines=!!u.plLines;
   if(!location.hash&&u.hash&&u.hash.startsWith('#livre-'))history.replaceState(null,'',u.hash);view._active=u.active}
-const loadingState=()=>`<div class="panel emptystate"><p class="muted">Chargement de vos livres…</p></div>`;
+const loadingState=()=>{const d=CLOUD.down;if(!d)return `<div class="panel emptystate"><p class="muted">Chargement de vos livres…</p></div>`;
+  return `<div class="panel emptystate"><h2>L'espace en ligne ne répond pas</h2><p class="muted">Vos livres sont enregistrés en ligne (Supabase) et le serveur ne répond pas pour l'instant. Un nouvel essai est fait toutes les 30 secondes${d.n>1?` (${d.n} essais)`:''}.</p>
+    <p class="small muted">Si cela dure, l'administrateur peut vérifier dans Supabase que le projet n'est pas en pause.</p>
+    <p class="small mono muted" style="word-break:break-word">Détail : ${esc(d.msg||'aucune réponse')}${d.code?` (${esc(String(d.code))})`:''}</p>
+    <button class="btn primary" data-act="cloud-retry">Réessayer maintenant</button></div>`};
 function observeTiles(){
   if(observer)observer.disconnect();const root=document.getElementById('pb-scroll');if(!root)return;
   observer=new IntersectionObserver(ents=>{for(const e of ents)if(e.isIntersecting){const it=lib.items[+e.target.dataset.idx];if(it)queueThumb(it);observer.unobserve(e.target)}},{root,rootMargin:'300px'});
@@ -727,7 +744,7 @@ function observeTiles(){
 function stChip(bookId,k){const s=books.get(bookId).stages[k]||'todo';return `<button class="stchip st-${s}" data-act="cycle" data-book="${esc(bookId)}" data-stage="${k}" title="Cliquer pour passer à « ${ST[ST[s].next].label} »">${ST[s].label}</button>`}
 
 function renderProgress(){
-  if(!loaded)return loadingState();
+  if(!loaded||(CLOUD.down&&!books.size))return loadingState();
   const list=[...books.values()].map(normBook).sort((a,b)=>a.year-b.year||(a.order??999)-(b.order??999)||a.title.localeCompare(b.title));
   const done=list.filter(b=>progress(b)===1).length, doing=list.filter(b=>{const p=progress(b);return p>0&&p<1}).length;
   const overAll=list.reduce((a,b)=>a+metrics(b).over.length,0);
@@ -1686,7 +1703,7 @@ document.addEventListener('focusout',e=>{if(e.target&&e.target.id==='red-ed'){co
    La structure (pages, blocs, styles) vient du panneau InDesign (table creations). Chaque bloc photo et chaque texte
    est un enregistrement (table blocks) avec une version et un verrou : le site et InDesign écrivent bloc par bloc,
    jamais le livre entier, et une écriture sur une version périmée ou un bloc verrouillé est refusée. */
-const MB_VERSION='202610250735';
+const MB_VERSION='202611011748';
 const IS_ADMIN=()=>((CLOUD.user&&CLOUD.user.email)||'').toLowerCase()==='gardy.eugene@gmail.com';
 function fmtBuild(v){const m=String(v).match(/^(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)/);return m?`${m[3]}/${m[2]} ${m[4]}:${m[5]}`:v}
 function renderVersion(){const el=document.getElementById('ver-slot');if(!el)return;
@@ -2283,6 +2300,7 @@ document.addEventListener('click',async ev=>{
     case 'fx-hide':{const set=fxHidden(b);set.add(t.dataset.tk);fxSetHidden(b,set);if(view.rsel===t.dataset.tk)view.rsel=null;render();toast('Bloc masqué dans le mode Focus');break}
     case 'fx-show':{const set=fxHidden(b);set.delete(t.dataset.tk);fxSetHidden(b,set);render();break}
     case 'accounts':openAccounts();break;
+    case 'cloud-retry':clearTimeout(CLOUD.retryT);if(CLOUD.down)CLOUD.down.msg='nouvel essai…';render();cloudStart();break;
     case 'fonts':openFonts();break;
     case 'font-del':{const v=view.fonts;if(!v)break;if(v.armed!==t.dataset.id){v.armed=t.dataset.id;renderFonts();break}fontsDel(t.dataset.id);break}
     case 'fidelity':openFidelity();break;
