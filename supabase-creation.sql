@@ -120,7 +120,8 @@ begin
     returning * into r;
     return jsonb_build_object('ok', true, 'row', to_jsonb(r));
   end if;
-  if r.lock_until > now() and r.lock_sid is distinct from p_sid then
+  -- a block with no content online (cancelled, deleted) can always be sent again, even if someone has it open
+  if r.lock_until > now() and r.lock_sid is distinct from p_sid and not r.deleted then
     return jsonb_build_object('ok', false, 'reason', 'locked', 'row', to_jsonb(r));
   end if;
   if p_rev >= 0 and r.rev <> p_rev and not r.deleted then

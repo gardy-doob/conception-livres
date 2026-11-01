@@ -711,8 +711,15 @@ function render(){
   document.documentElement.style.setProperty('--toph',headerH()+'px');observeTiles();renderSelbar();renderPool();renderRbar();if(loaded)saveUI();maybeReopenDir();
   if(view.route==='livre'&&b)fontsTick(b);
   if(view.route==='livre'&&view.tab==='redac')flowAll();
+  // Rédaction: the writing area is brought just under the header (entering the tab, changing planche), so that no part of
+  // the pages stays hidden under the bottom strip
+  if(view.route==='livre'&&view.tab==='redac'&&!view.rfocus&&!matchMedia('(max-width:1000px)').matches){const k=view.id+':'+view.rk;const el=document.getElementById('redac');
+    if(el&&view._rScrolled!==k){view._rScrolled=k;const top=el.getBoundingClientRect().top-headerH()-8;if(Math.abs(top)>4)window.scrollTo({top:Math.max(0,window.scrollY+top)})}}
+  else view._rScrolled=null;
   if(view.route==='livre'&&view.tab==='redac'&&view.rfocus)fxBind();else{view.fxKeep=null;document.documentElement.classList.remove('fx-lock')}
-  crPresence();{const bb=view.route==='livre'?books.get(view.id):null;const want=bb&&inCreation(bb)&&view.tab==='redac'&&view.rsel?'s'+String(view.rsel).split('#')[1]:null;if(want!==CR.lockBid){if(want)crLock(bb,want);else crUnlock(bb||books.get(CR.lockBook))}CR.lockBook=bb&&bb.id}
+  crPresence();{const bb=view.route==='livre'?books.get(view.id):null;let want=bb&&inCreation(bb)&&view.tab==='redac'&&view.rsel?'s'+String(view.rsel).split('#')[1]:null;
+    // a block with no live content online (not yet sent by InDesign, or cancelled) is not locked: InDesign must be able to send it
+    if(want){const rw=crOf(bb)&&crOf(bb).rows.get(want);if(!rw||rw.deleted)want=null}if(want!==CR.lockBid){if(want)crLock(bb,want);else crUnlock(bb||books.get(CR.lockBook))}CR.lockBook=bb&&bb.id}
   if(view.mepSettings){if(view.route==='livre'&&view.tab==='layouts'&&view._mepSet){const sc=document.querySelector('#overlay .modal')?.scrollTop;showModal(view._mepSet,'wide mepset');const md=document.querySelector('#overlay .modal');if(md&&sc)md.scrollTop=sc}else closeOverlay()}
   if(view.edit){const t=document.getElementById('pe-text');if(t&&document.activeElement!==t){t.focus();t.setSelectionRange(t.value.length,t.value.length)}}
 }
@@ -1713,7 +1720,7 @@ document.addEventListener('focusout',e=>{if(e.target&&e.target.id==='red-ed'){co
    La structure (pages, blocs, styles) vient du panneau InDesign (table creations). Chaque bloc photo et chaque texte
    est un enregistrement (table blocks) avec une version et un verrou : le site et InDesign écrivent bloc par bloc,
    jamais le livre entier, et une écriture sur une version périmée ou un bloc verrouillé est refusée. */
-const MB_VERSION='202611011756';
+const MB_VERSION='202611011943';
 const IS_ADMIN=()=>((CLOUD.user&&CLOUD.user.email)||'').toLowerCase()==='gardy.eugene@gmail.com';
 function fmtBuild(v){const m=String(v).match(/^(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)/);return m?`${m[3]}/${m[2]} ${m[4]}:${m[5]}`:v}
 function renderVersion(){const el=document.getElementById('ver-slot');if(!el)return;

@@ -676,7 +676,7 @@ details.legacy>summary{cursor:pointer;font-weight:600;color:var(--muted);margin-
 .redac.fs{position:fixed;inset:0;z-index:28;height:auto;background:var(--paper);padding:10px 12px}
 .rmain{display:flex;flex-direction:column;min-height:0;min-width:0;gap:8px}
 .rbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.rstage{flex:1;min-height:0;container-type:size;display:grid;place-items:center;background:var(--sunk);border-radius:var(--r);padding:12px;overflow:hidden}
+.rstage{flex:1;min-height:0;container-type:size;display:grid;place-items:start center;background:var(--sunk);border-radius:var(--r);padding:12px;overflow:hidden}
 .rspread{display:grid;grid-template-columns:1fr 1fr;box-shadow:0 6px 24px rgba(0,0,0,.18);background:#fff}
 .rpage{position:relative;container-type:inline-size;background:#fff;isolation:isolate;min-width:0}
 .rpage.left{z-index:2}
