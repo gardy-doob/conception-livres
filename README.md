@@ -39,4 +39,10 @@ l'application) et versement des textes rédigés, sans toucher à la mise en for
 - Chaque bloc a une version et un verrou ; synchronisation en direct seulement quand quelqu'un d'autre est actif sur le livre,
   sinon à l'enregistrement. Fermeture sans enregistrer ou plantage : les modifications InDesign non enregistrées sont annulées en ligne
   et celles du site réappliquées au document.
-- Partage d'un livre avec un autre compte : bouton « Partager » dans l'en-tête du livre.
+- Partage d'un livre : bouton « Partager » dans l'en-tête du livre, une adresse e-mail suffit. Si la personne n'a pas de compte,
+  elle reçoit une invitation par e-mail ; en cliquant, elle choisit un mot de passe et le livre est dans sa liste.
+  Mise en place : lancer `supabase-partage.sql`, déployer `supabase/functions/partage` (`supabase functions deploy partage`),
+  et dans Supabase > Authentication > URL Configuration mettre l'URL du site en Site URL et `https://gardy-doob.github.io/conception-livres/**` dans Redirect URLs
+  (sinon les liens reçus par e-mail ne reviennent pas sur le site). Sans la fonction, le partage marche encore mais la personne doit déjà avoir un compte.
+- Page de connexion : mot de passe oublié (lien par e-mail), connexion sans mot de passe par lien, accueil des invités.
+  La déconnexion ne ferme plus que la session du navigateur (le panneau InDesign reste connecté).

@@ -190,7 +190,12 @@ async function saveLocal(id,removed){
     catch(e){toast("Impossible d'enregistrer dans le navigateur : "+(e&&e.name==='QuotaExceededError'?'espace plein.':'stockage bloqué.'));setSaved('Non enregistré');return}}
   try{localStorage.setItem(LS_KEY,JSON.stringify({books:[...books.values()],captures}));ping(id?{book:id}:{all:1});setSaved('Enregistré dans ce navigateur · '+stamp())}catch(e){toast("Impossible d'enregistrer : stockage du navigateur plein ou bloqué. Faites une sauvegarde (.json).")}}
 /* ---- online storage (Supabase): every change is sent right away; a local copy stays in the browser for offline work ---- */
-const CLOUD={cfg:window.CDF_CONFIG||{},sb:null,user:null,pending:new Map(),timers:new Map(),started:false,channel:null,busy:false};
+const CLOUD={cfg:window.CDF_CONFIG||{},sb:null,user:null,pending:new Map(),timers:new Map(),started:false,channel:null,busy:false,owners:new Map()};
+// Link received by e-mail (invitation, forgotten password, sign-in link): supabase-js consumes the URL hash, so read it first
+const AUTH_LINK=(()=>{try{const p=new URLSearchParams(location.hash.replace(/^#\/?/,''));if(p.get('error_description'))return {type:'error',msg:p.get('error_description').replace(/\+/g,' ')};const t=p.get('type');return t?{type:t}:null}catch(e){return null}})();
+if(AUTH_LINK)history.replaceState(null,'',location.pathname+location.search);
+const AUTH_REDIRECT=location.origin+location.pathname;
+view.auth={screen:'login',msg:'',err:false,busy:false};
 const cloudConfigured=()=>!!(CLOUD.cfg.supabaseUrl&&CLOUD.cfg.supabaseKey&&window.supabase&&window.supabase.createClient);
 const cloudOn=()=>!!(CLOUD.sb&&CLOUD.user);
 function loadPending(){try{const o=JSON.parse(localStorage.getItem('cdf-pending')||'{}');CLOUD.pending=new Map(Object.entries(o))}catch(e){}}
@@ -266,6 +271,8 @@ async function cloudStart(){
     }
     await crLoadAll();await pjLoad();
     loaded=true;cloudFlushAll();cloudStatus();render();
+    if(view.authWelcome){const w=view.authWelcome;view.authWelcome=null;openMyPass(w)}
+    cloudLoadOwners();
     CLOUD.down=null;
   }catch(e){setSaved('Connexion en ligne impossible · travail local');
     const msg=String((e&&(e.message||e.error_description))||e||'');const code=e&&(e.code||e.status)||'';
@@ -281,9 +288,13 @@ async function cloudInit(){
   CLOUD.sb=window.supabase.createClient(CLOUD.cfg.supabaseUrl,CLOUD.cfg.supabaseKey,{auth:{persistSession:true,autoRefreshToken:true,storageKey:'cdf-auth'}});
   try{const {data}=await CLOUD.sb.auth.getSession();CLOUD.user=data.session?data.session.user:null}catch(e){}
   CLOUD.checked=true;
-  CLOUD.sb.auth.onAuthStateChange((ev,sess)=>{const u=sess?sess.user:null;const changed=(u&&u.id)!==(CLOUD.user&&CLOUD.user.id);CLOUD.user=u;if(changed){if(u)cloudStart();else{if(CLOUD.channel){CLOUD.sb.removeChannel(CLOUD.channel);CLOUD.channel=null}forgetAccount();setSaved('');render()}}});
+  CLOUD.sb.auth.onAuthStateChange((ev,sess)=>{const u=sess?sess.user:null;const changed=(u&&u.id)!==(CLOUD.user&&CLOUD.user.id);CLOUD.user=u;if(ev==='PASSWORD_RECOVERY')view.authWelcome='recovery';if(changed){if(u)cloudStart();else{if(CLOUD.channel){CLOUD.sb.removeChannel(CLOUD.channel);CLOUD.channel=null}forgetAccount();setSaved('');render()}}});
+  if(AUTH_LINK&&(AUTH_LINK.type==='invite'||AUTH_LINK.type==='recovery'))view.authWelcome=AUTH_LINK.type;
+  if(AUTH_LINK&&AUTH_LINK.type==='error'){view.auth.msg=/expired|invalid/i.test(AUTH_LINK.msg)?'Ce lien a expiré ou a déjà servi. Demandez-en un nouveau ci-dessous.':AUTH_LINK.msg;view.auth.err=true}
   if(CLOUD.user)await cloudStart();else render();
 }
+async function cloudLoadOwners(){try{const {data}=await CLOUD.sb.from('book_shares').select('owner,book_id,owner_email').eq('email',(CLOUD.user.email||'').toLowerCase());CLOUD.owners.clear();(data||[]).forEach(r=>{if(r.owner_email)CLOUD.owners.set(r.owner+'|'+r.book_id,r.owner_email)});softRender()}catch(e){}}
+const sharedBy=b=>isShared(b)?(CLOUD.owners.get(b._owner+'|'+b.id)||''):'';
 function forgetAccount(){
   const ids=[...books.keys()];books.clear();versions=[];CR.byBook.clear();PJ.docs.clear();PJ.todos.clear();CLOUD.pending.clear();try{savePending()}catch(e){}
   if(IDB.ok){ids.forEach(id=>idbDel('book:'+id).catch(()=>{}));}loaded=false;view.files=null;view.accounts=null;location.hash='#avancement';
@@ -299,7 +310,7 @@ function renderAccounts(){const v=view.accounts;if(!v)return;const me=myId();
     ${v.shown&&v.shown.id===u.id?`<span class="acct-pw">Nouveau mot de passe : <code>${esc(v.shown.password)}</code> <button class="btn ghost sm" data-act="acct-copy">Copier</button></span>`:''}</div>
     <div class="acct-a">${u.id===me?'':`<button class="btn ghost sm" data-act="acct-pass" data-id="${esc(u.id)}">Nouveau mot de passe</button><button class="btn ghost sm" data-act="${u.disabled?'acct-enable':'acct-disable'}" data-id="${esc(u.id)}">${u.disabled?'Réactiver':'Désactiver'}</button><button class="btn ghost sm danger ${arm?'armed':''}" data-act="acct-del" data-id="${esc(u.id)}" title="Supprime le compte et les livres dont il est propriétaire">${arm?'Confirmer : compte et livres supprimés':'Supprimer'}</button>`}</div></div>`};
   showModal(`<div class="row" style="justify-content:space-between"><h3>Comptes des utilisateurs</h3><button class="btn ghost sm" data-act="close-overlay">Fermer</button></div>
-    <p class="small muted" style="margin:0">Personne ne peut créer de compte seul : vous créez chaque compte ici et transmettez l'adresse et le mot de passe à la personne. Elle pourra ensuite le changer (menu › Changer mon mot de passe). Pour qu'elle voie un livre, partagez-le avec son adresse (bouton Partager du livre).</p>
+    <p class="small muted" style="margin:0">Le plus simple pour donner accès à quelqu'un : le bouton « Partager » d'un livre, qui lui envoie une invitation par e-mail et crée son compte. Cette page sert pour le reste : créer un compte sans livre, changer un mot de passe, désactiver ou supprimer un compte.</p>
     <form class="acct-new" id="acct-form" novalidate><input class="f" id="ac-email" type="email" placeholder="Adresse e-mail" autocomplete="off" value="${esc(v.draft.email)}">
       <span class="acct-pwin"><input class="f mono" id="ac-pass" type="text" autocomplete="off" value="${esc(v.draft.password)}" aria-label="Mot de passe"><button class="btn ghost sm" type="button" data-act="acct-gen" title="Générer un autre mot de passe">↻</button></span>
       <button class="btn primary" type="submit">Créer le compte</button></form>
@@ -308,29 +319,35 @@ function renderAccounts(){const v=view.accounts;if(!v)return;const me=myId();
 }
 async function acctDo(action,id,extra){const v=view.accounts;v.err='';v.msg='';try{const r=await acctCall(Object.assign({action,id},extra||{}));
   if(r&&r.user){const i=v.list.findIndex(x=>x.id===r.user.id);if(i>=0)v.list[i]=r.user;else v.list.push(r.user)}if(action==='delete')v.list=v.list.filter(x=>x.id!==id);return r}catch(e){v.err=e.message;return null}finally{renderAccounts()}}
-function openMyPass(){view.menu=false;view.myPass={err:'',ok:false};renderMyPass()}
-function renderMyPass(){const v=view.myPass;if(!v)return;
-  showModal(`<div class="row" style="justify-content:space-between"><h3>Changer mon mot de passe</h3><button class="btn ghost sm" data-act="close-overlay">Fermer</button></div>
+function openMyPass(welcome){view.menu=false;view.myPass={err:'',ok:false,welcome:welcome||''};renderMyPass()}
+function renderMyPass(){const v=view.myPass;if(!v)return;const w=v.welcome;
+  showModal(`<div class="row" style="justify-content:space-between"><h3>${w==='invite'?'Bienvenue sur moodbook':w==='recovery'?'Choisissez un nouveau mot de passe':'Changer mon mot de passe'}</h3><button class="btn ghost sm" data-act="close-overlay">${w?'Plus tard':'Fermer'}</button></div>
+    ${w==='invite'?`<p class="small muted" style="margin:0">Vous êtes connecté avec <b>${esc(CLOUD.user.email||'')}</b>. Choisissez un mot de passe pour revenir ici la prochaine fois ; le livre partagé avec vous est déjà dans votre liste.</p>`:''}
     ${v.ok?`<p class="small" role="status">Mot de passe changé.</p>`:`<form class="grid" id="mypass-form" novalidate style="display:grid;gap:8px"><input class="f" id="mp-1" type="password" autocomplete="new-password" placeholder="Nouveau mot de passe (8 caractères min.)"><input class="f" id="mp-2" type="password" autocomplete="new-password" placeholder="Le même, une seconde fois"><button class="btn primary" type="submit">Enregistrer</button>${v.err?`<p class="err small" role="alert" style="margin:0">${esc(v.err)}</p>`:''}</form>`}`);
   setTimeout(()=>document.getElementById('mp-1')?.focus(),0)}
-function renderGate(){
-  return `<div class="gate"><form class="panel gatebox" id="cloud-login" novalidate>
-    <div class="gate-h"><span class="brand-mark" aria-hidden="true"><i></i><i></i></span><b>moodbook</b><span class="muted">conception livre</span></div>
-    <p class="small muted" style="margin:0">Connectez-vous avec le compte que l'administrateur vous a créé.</p>
-    <label class="small">Adresse e-mail<input class="f" id="cl-email" type="email" autocomplete="email" value="${esc(view.cloudEmail||'')}"></label>
-    <label class="small">Mot de passe<input class="f" id="cl-pass" type="password" autocomplete="current-password"></label>
-    <button class="btn primary" type="submit" data-mode="in">Se connecter</button>
-    ${view.cloudMsg?`<p class="small ${view.cloudErr?'err':'muted'}" role="alert" style="margin:0">${esc(view.cloudMsg)}</p>`:''}
-    <p class="small muted" style="margin:0">Pas de compte, ou mot de passe oublié ? Demandez-le à l'administrateur.</p></form></div>`;
-}
-function renderCloudBox(){
-  if(!cloudConfigured()||CLOUD.user)return '';
-  return `<form class="panel cloudbox" id="cloud-login" novalidate>
-    <div><b>Votre espace en ligne</b><p class="small muted" style="margin:2px 0 0">Connectez-vous pour enregistrer vos livres en ligne et les retrouver sur tous vos ordinateurs. Les photos restent sur votre ordinateur.</p></div>
-    <input class="f" id="cl-email" type="email" autocomplete="email" placeholder="Adresse e-mail" value="${esc(view.cloudEmail||'')}">
-    <input class="f" id="cl-pass" type="password" autocomplete="current-password" placeholder="Mot de passe (6 caractères min.)">
-    <button class="btn primary" type="submit" data-mode="in">Se connecter</button>
-    ${view.cloudMsg?`<p class="small ${view.cloudErr?'err':'muted'}" style="grid-column:1/-1;margin:0">${esc(view.cloudMsg)}</p>`:''}</form>`;
+function renderGate(){const a=view.auth;const email=esc(view.cloudEmail||'');
+  const msg=a.msg?`<p class="small auth-msg ${a.err?'err':'ok-msg'}" role="alert">${esc(a.msg)}</p>`:'';
+  const form=a.screen==='forgot'?`<form class="auth-form" id="auth-forgot" novalidate>
+      <h2>Mot de passe oublié</h2><p class="small muted">Indiquez votre adresse : vous recevrez un lien pour choisir un nouveau mot de passe.</p>
+      <label class="small">Adresse e-mail<input class="f" id="cl-email" type="email" autocomplete="email" value="${email}" required></label>
+      <button class="btn primary" type="submit" ${a.busy?'disabled':''}>Envoyer le lien</button>${msg}
+      <p class="small"><button class="linkbtn" type="button" data-act="auth-screen" data-screen="login">← Retour à la connexion</button></p></form>`
+    :a.screen==='magic'?`<form class="auth-form" id="auth-magic" novalidate>
+      <h2>Lien de connexion</h2><p class="small muted">Pas besoin de mot de passe : vous recevez un lien par e-mail et vous êtes connecté en cliquant dessus.</p>
+      <label class="small">Adresse e-mail<input class="f" id="cl-email" type="email" autocomplete="email" value="${email}" required></label>
+      <button class="btn primary" type="submit" ${a.busy?'disabled':''}>Recevoir le lien</button>${msg}
+      <p class="small"><button class="linkbtn" type="button" data-act="auth-screen" data-screen="login">← Retour à la connexion</button></p></form>`
+    :`<form class="auth-form" id="cloud-login" novalidate>
+      <h2>Connexion</h2>
+      <label class="small">Adresse e-mail<input class="f" id="cl-email" type="email" autocomplete="email" value="${email}" required></label>
+      <label class="small"><span class="row" style="justify-content:space-between">Mot de passe<button class="linkbtn" type="button" data-act="auth-screen" data-screen="forgot">Oublié ?</button></span><input class="f" id="cl-pass" type="password" autocomplete="current-password" required></label>
+      <button class="btn primary" type="submit" ${a.busy?'disabled':''}>Se connecter</button>${msg}
+      <p class="small muted" style="margin:0">ou <button class="linkbtn" type="button" data-act="auth-screen" data-screen="magic">recevoir un lien de connexion par e-mail</button></p>
+      <p class="small muted auth-foot">Pas encore de compte ? Il se crée quand quelqu'un partage un livre avec vous : vous recevez alors une invitation par e-mail.</p></form>`;
+  return `<div class="auth"><section class="auth-side"><div class="auth-brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i></span><b>moodbook</b></div>
+      <h1>Concevoir un livre photo, à plusieurs, en lien avec InDesign.</h1>
+      <ul class="auth-points"><li>Chemin de fer, événements et photos sur une seule page</li><li>Textes rédigés sur le site, mis en page dans InDesign</li><li>Chaque livre partagé avec les personnes de votre choix</li></ul></section>
+    <section class="panel auth-box">${form}</section></div>`;
 }
 async function loadIDB(){
   const all=await idbAll();let n=0;
@@ -699,7 +716,7 @@ function render(){
   const gated=cloudConfigured()&&!CLOUD.user;document.body.classList.toggle('gated',gated);
   if(gated){document.getElementById('nav').innerHTML='';document.getElementById('burger-slot').innerHTML='';document.getElementById('hist-slot').innerHTML='';
     document.getElementById('app').innerHTML=CLOUD.checked?renderGate():loadingState();['pool','rbarslot'].forEach(id=>{const e=document.getElementById(id);if(e)e.innerHTML=''});
-    document.body.classList.remove('has-pool','has-rbar');setTimeout(()=>{const e=document.getElementById(view.cloudEmail?'cl-pass':'cl-email');if(e&&!document.activeElement.closest('#cloud-login'))e.focus()},0);return}
+    document.body.classList.remove('has-pool','has-rbar');setTimeout(()=>{const e=document.getElementById(view.cloudEmail&&view.auth.screen==='login'?'cl-pass':'cl-email');if(e&&!document.activeElement.closest('.auth-form'))e.focus()},0);return}
   const nav=document.getElementById('nav');const b=view.route==='livre'?books.get(view.id):null;
   renderVersion();const nv=renderNav(b);nav.innerHTML=nv.links;document.getElementById('burger-slot').innerHTML=nv.burger;renderHistSlot();
   const app=document.getElementById('app');
@@ -788,7 +805,7 @@ function renderProgress(){
         <td><a class="btn" href="#livre-${esc(b.id)}">Ouvrir</a></td></tr>`;
     }
   }
-  return renderCloudBox()+`<div class="head"><div><div class="eyebrow">Tous les projets</div><h1>Tableau de bord</h1></div>
+  return `<div class="head"><div><div class="eyebrow">Tous les projets</div><h1>Tableau de bord</h1></div>
     <div class="row">${cloudOn()?`<button class="btn" data-act="pj-files">Fichiers InDesign${pjFixCount()?` <span class="pill bad">${pjFixCount()}</span>`:''}</button>`:''}<button class="btn primary" data-act="show-new">+ Nouveau livre</button></div></div>
     ${pjFixCount()?`<div class="warnbar">${pjFixCount()} projet${pjFixCount()>1?'s':''} en création sans fichier livre relié : synchronisation corrective recommandée.<button class="btn sm" data-act="pj-files">Voir les projets</button></div>`:''}
     ${newForm}
@@ -814,7 +831,7 @@ function renderBook(b){
   const alertList=[m.over.length?`${m.over.length} mise${m.over.length>1?'s':''} en page utilisée${m.over.length>1?'s':''} plus de ${b.maxReuse} fois`:'',m.short.length?`${m.short.length} événement${m.short.length>1?'s':''} sans assez de places photo`:''].filter(Boolean);
   const head=`<header class="bookhead2">
       <div class="bh-main">
-        <span class="eyebrow">Livre${isShared(b)?' · <span class="shared-tag">partagé avec vous</span>':''}${inCreation(b)?' · <span class="cr-tag">en création</span>':''}</span>
+        <span class="eyebrow">Livre${isShared(b)?` · <span class="shared-tag">partagé avec vous${sharedBy(b)?' par '+esc(sharedBy(b)):''}</span>`:''}${inCreation(b)?' · <span class="cr-tag">en création</span>':''}</span>
         <input class="titleinput" id="bk-title" data-act="title" value="${esc(b.title)}" aria-label="Titre du livre">
         <div class="bh-specs">
           <label class="spec">Année<input class="mini mono" type="number" id="bk-year" data-act="year" value="${b.year}" aria-label="Année"></label>
@@ -2076,18 +2093,25 @@ function renderNotes(b){
 }
 async function tdPatch(b,id,patch){const t=pjTodos(b).find(x=>x.id===id);if(!t)return;Object.assign(t,patch,{updated_at:new Date().toISOString()});softRender();
   const {error}=await CLOUD.sb.from('project_todos').update(Object.assign({},patch,{updated_at:t.updated_at})).eq('owner',t.owner).eq('book_id',t.book_id).eq('id',id);if(error)toast('Note non enregistrée : '+error.message)}
-// Sharing a book with another account (by e-mail)
+// Sharing a book with another person (by e-mail). With the « partage » function deployed, the person is invited by e-mail
+// and gets an account automatically; without it, the share is written directly and the person needs an existing account.
+async function shareCall(body){const {data,error}=await CLOUD.sb.functions.invoke('partage',{body});
+  if(error){let m=error.message||'';try{const j=await error.context?.json?.();if(j&&j.error)m=j.error}catch(e){}const err=new Error(m||'fonction indisponible');err.noFn=/Failed to send|not found|404|Failed to fetch/i.test(m);throw err}
+  if(data&&data.error)throw new Error(data.error);return data}
 async function openShare(b){
-  view.share={book:b.id,list:null,err:''};renderShare();
-  try{const {data,error}=await CLOUD.sb.from('book_shares').select('email,created_at').eq('owner',myId()).eq('book_id',b.id);if(error)throw error;view.share.list=data}catch(e){view.share.err="Le partage n'est pas encore installé dans Supabase (script supabase-creation.sql)."}
+  view.share={book:b.id,list:null,err:'',msg:'',direct:false};renderShare();
+  try{const r=await shareCall({action:'list',book_id:b.id});view.share.list=r.shares}
+  catch(e){if(e.noFn){view.share.direct=true;try{const {data,error}=await CLOUD.sb.from('book_shares').select('email,created_at').eq('owner',myId()).eq('book_id',b.id);if(error)throw error;view.share.list=data.map(x=>({...x,status:'unknown'}))}catch(e2){view.share.err="Le partage n'est pas encore installé dans Supabase (script supabase-creation.sql)."}}else view.share.err=e.message}
   renderShare();
 }
+const shareStatus=x=>x.status==='active'?'<span class="pill ok">a un compte</span>':x.status==='invited'?'<span class="pill doing">invitation envoyée</span>':x.status==='none'?'<span class="pill wait">pas de compte</span>':'';
 function renderShare(){const s=view.share;if(!s)return;const b=books.get(s.book);
   showModal(`<div class="row" style="justify-content:space-between"><h3>Partager « ${esc(b.title)} »</h3><button class="btn ghost sm" data-act="close-overlay">Fermer</button></div>
-    <p class="small muted" style="margin:0">La personne invitée crée son propre compte moodbook avec cette adresse e-mail : le livre apparaît alors dans sa liste. Elle peut rédiger les textes et voir l'avancement ; vous voyez quand elle est sur le livre.</p>
-    ${s.err?`<p class="err">${esc(s.err)}</p>`:''}
-    ${s.list?`<div class="share-list">${s.list.map(x=>`<div class="row"><span>${esc(x.email)}</span><span style="flex:1"></span><button class="btn ghost sm danger" data-act="share-del" data-email="${esc(x.email)}">Retirer</button></div>`).join('')||'<p class="small muted">Ce livre n\'est partagé avec personne.</p>'}</div>`:'<p class="small muted">Chargement…</p>'}
-    <form class="row" id="share-form"><input class="f" id="share-email" type="email" placeholder="Adresse e-mail" style="flex:1"><button class="btn primary" type="submit">Inviter</button></form>`);
+    <form class="share-add" id="share-form" novalidate><input class="f" id="share-email" type="email" placeholder="Adresse e-mail de la personne" autocomplete="off" ${s.busy?'disabled':''}><button class="btn primary" type="submit" ${s.busy?'disabled':''}>Partager</button></form>
+    <p class="small muted" style="margin:0">${s.direct?"La personne doit déjà avoir un compte moodbook avec cette adresse (fonction « partage » non déployée).":"La personne reçoit un e-mail. Si elle n'a pas encore de compte, le lien lui en crée un : elle choisit un mot de passe et le livre est dans sa liste."} Elle peut rédiger les textes, placer les photos en création et voir l'avancement.</p>
+    ${s.err?`<p class="err small" role="alert" style="margin:0">${esc(s.err)}</p>`:''}${s.msg?`<p class="small ok-msg" role="status" style="margin:0">${esc(s.msg)}</p>`:''}
+    ${s.list?`<div class="share-list">${s.list.map(x=>`<div class="share-row"><span class="share-who"><b>${esc(x.email)}</b>${shareStatus(x)}</span><span class="share-act">${x.status==='invited'||x.status==='active'?`<button class="btn ghost sm" data-act="share-resend" data-email="${esc(x.email)}" title="Envoie un lien qui connecte directement, sans mot de passe">Renvoyer un lien</button>`:''}<button class="btn ghost sm danger" data-act="share-del" data-email="${esc(x.email)}">Retirer</button></span></div>`).join('')||'<p class="small muted" style="margin:0">Ce livre n\'est partagé avec personne.</p>'}</div>`:'<p class="small muted">Chargement…</p>'}`);
+  setTimeout(()=>{const e=document.getElementById('share-email');if(e)e.focus()},0);
 }
 
 /* ================= import des événements ================= */
@@ -2312,6 +2336,8 @@ document.addEventListener('click',async ev=>{
     case 'mep-settings':view.mepSettings=true;render();break;
     case 'legacy-del':{ev.preventDefault();if(view.armed!=='legacy'){arm('legacy');break}view.armed=null;remember(b);const n=b.layouts.length;b.layouts=[];b.spreads={};save(b);toastUndo(`${n} anciennes mises en page supprimées`);break}
     case 'share':openShare(b);break;
+    case 'auth-screen':view.auth.screen=t.dataset.screen;view.auth.msg='';view.auth.err=false;render();break;
+    case 'share-resend':{const em=t.dataset.email;t.disabled=true;const r=await CLOUD.sb.auth.signInWithOtp({email:em,options:{shouldCreateUser:false,emailRedirectTo:AUTH_REDIRECT}});toast(r.error?'Envoi impossible : '+r.error.message:`Lien de connexion envoyé à ${em}.`);break}
     case 'r-focus':view.rfocus=!view.rfocus;view.fxKeep=null;view.fxPl=null;if(view.rfocus){view.fxGoto=view.rk;if(view.rsel)view.fxShow='fxc-'+view.rsel.replace(/[^\w-]/g,'_')}render();if(!view.rfocus)scrollUnderTabs('redac');break;
     case 'fx-go':{const k=+t.dataset.k;view.fxGoto=k;view.fxKeep=null;view.rk=k;render();break}
     case 'fx-hide':{const set=fxHidden(b);set.add(t.dataset.tk);fxSetHidden(b,set);if(view.rsel===t.dataset.tk)view.rsel=null;render();toast('Bloc masqué dans le mode Focus');break}
@@ -2351,7 +2377,7 @@ document.addEventListener('click',async ev=>{
     case 'td-del':{const tt=pjTodos(b).find(x=>x.id===t.dataset.id);if(!tt)break;const k=tt.owner+'|'+tt.book_id;PJ.todos.set(k,pjTodos(b).filter(x=>x.id!==tt.id));render();
       const {error}=await CLOUD.sb.from('project_todos').delete().eq('owner',tt.owner).eq('book_id',tt.book_id).eq('id',tt.id);if(error){pjPutTodo(tt);render();toast('Suppression impossible : '+error.message)}else toast('Note supprimée');break}
     case 'td-move':{const tt=pjTodos(b).find(x=>x.id===t.dataset.id);if(tt)tdPatch(b,tt.id,{target:tt.target==='indesign'?'site':'indesign'});break}
-    case 'share-del':{const em=t.dataset.email;try{await CLOUD.sb.from('book_shares').delete().eq('owner',myId()).eq('book_id',view.share.book).eq('email',em);view.share.list=view.share.list.filter(x=>x.email!==em)}catch(e){toast('Retrait impossible pour le moment.')}renderShare();break}
+    case 'share-del':{const em=t.dataset.email;const s=view.share;s.err='';s.msg='';try{if(s.direct){const {error}=await CLOUD.sb.from('book_shares').delete().eq('owner',myId()).eq('book_id',s.book).eq('email',em);if(error)throw error}else await shareCall({action:'remove',book_id:s.book,email:em});s.list=s.list.filter(x=>x.email!==em);s.msg=`${em} n'a plus accès au livre.`}catch(e){s.err='Retrait impossible : '+e.message}renderShare();break}
     case 'rc-mine':resolveReconcile('mine');break;
     case 'rc-theirs':resolveReconcile('theirs');break;
     case 'rc-both':resolveReconcile('both');break;
@@ -2421,7 +2447,7 @@ document.addEventListener('click',async ev=>{
     case 'folder-reopen':reopenFolder(b,t.dataset.fid);break;
     case 'folder-del':{const k='fold:'+t.dataset.fid;if(view.armed===k){view.armed=null;removeFolder(b,t.dataset.fid)}else arm(k);break}
     case 'folder-later':closeOverlay();break;
-    case 'cloud-out':{view.menu=false;if(CLOUD.pending.size&&!view.armedOut){view.armedOut=true;toast(`${CLOUD.pending.size} modification(s) pas encore envoyée(s) : cliquez à nouveau pour vous déconnecter quand même.`);break}view.armedOut=false;await CLOUD.sb.auth.signOut();break}
+    case 'cloud-out':{view.menu=false;if(CLOUD.pending.size&&!view.armedOut){view.armedOut=true;toast(`${CLOUD.pending.size} modification(s) pas encore envoyée(s) : cliquez à nouveau pour vous déconnecter quand même.`);break}view.armedOut=false;await CLOUD.sb.auth.signOut({scope:'local'});break}
     case 'backup':{const data=JSON.stringify({app:'atelier-chemin-de-fer',saved:new Date().toISOString(),books:[...books.values()],captures},null,1);offerFile('atelier-sauvegarde-'+new Date().toISOString().slice(0,10)+'.json',data,data);view.menu=false;break}
     case 'restore':{const i=document.getElementById('restorepick');i.value='';i.click();view.menu=false;break}
     case 'cwd':lib.cwd=t.dataset.dir;render();{const s=document.getElementById('pb-scroll');if(s)s.scrollTop=0}break;
@@ -2639,15 +2665,24 @@ document.addEventListener('change',e=>{
 });
 document.addEventListener('submit',e=>{
   e.preventDefault();const f=e.target;const b=cur();
-  if(f.id==='cloud-login'){const email=document.getElementById('cl-email').value.trim(),pass=document.getElementById('cl-pass').value;view.cloudEmail=email;const m='in';
-    if(!email||!pass){view.cloudMsg='Indiquez votre e-mail et votre mot de passe.';view.cloudErr=true;render();return}
-    view.cloudMsg=m==='up'?'Création du compte…':'Connexion…';view.cloudErr=false;render();
-    (async()=>{const r=m==='up'?await CLOUD.sb.auth.signUp({email,password:pass,options:{emailRedirectTo:location.href.split('#')[0]}}):await CLOUD.sb.auth.signInWithPassword({email,password:pass});
-      if(r.error){view.cloudMsg=/invalid login/i.test(r.error.message)?'E-mail ou mot de passe incorrect.':/already registered/i.test(r.error.message)?'Ce compte existe déjà : utilisez « Se connecter ».':/confirm/i.test(r.error.message)?'Confirmez d\'abord votre adresse avec le lien reçu par e-mail.':r.error.message;view.cloudErr=true}
-      else if(m==='up'&&!r.data.session){view.cloudMsg='Compte créé : cliquez sur le lien reçu par e-mail, puis connectez-vous.';view.cloudErr=false}
-      else{view.cloudMsg='';view.cloudErr=false}render()})();return}
-  if(f.id==='share-form'){const em=document.getElementById('share-email').value.trim().toLowerCase();if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){view.share.err='Adresse e-mail invalide.';renderShare();return}
-    (async()=>{const {error}=await CLOUD.sb.from('book_shares').insert({book_id:view.share.book,email:em});if(error&&!/duplicate/i.test(error.message)){view.share.err="Invitation impossible : "+error.message}else{view.share.err='';view.share.list=[...(view.share.list||[]).filter(x=>x.email!==em),{email:em}]}renderShare()})();return}
+  if(f.id==='cloud-login'||f.id==='auth-forgot'||f.id==='auth-magic'){const a=view.auth;const email=document.getElementById('cl-email').value.trim().toLowerCase();view.cloudEmail=email;
+    const okMail=/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
+    if(f.id==='cloud-login'){const pass=document.getElementById('cl-pass').value;
+      if(!okMail||!pass){a.msg='Indiquez votre e-mail et votre mot de passe.';a.err=true;render();return}
+      a.msg='Connexion…';a.err=false;a.busy=true;render();
+      (async()=>{const r=await CLOUD.sb.auth.signInWithPassword({email,password:pass});a.busy=false;
+        if(r.error){a.msg=/invalid login/i.test(r.error.message)?'E-mail ou mot de passe incorrect.':/confirm/i.test(r.error.message)?'Confirmez d\'abord votre adresse avec le lien reçu par e-mail.':/banned|disabled/i.test(r.error.message)?'Ce compte est désactivé.':r.error.message;a.err=true}
+        else{a.msg='';a.err=false}render()})();return}
+    if(!okMail){a.msg='Indiquez une adresse e-mail valide.';a.err=true;render();return}
+    a.msg='Envoi…';a.err=false;a.busy=true;render();
+    (async()=>{const r=f.id==='auth-forgot'?await CLOUD.sb.auth.resetPasswordForEmail(email,{redirectTo:AUTH_REDIRECT}):await CLOUD.sb.auth.signInWithOtp({email,options:{shouldCreateUser:false,emailRedirectTo:AUTH_REDIRECT}});a.busy=false;
+      if(r.error){a.msg=/not found|signups not allowed|user not found/i.test(r.error.message)?'Aucun compte avec cette adresse. Demandez à la personne qui conçoit le livre de le partager avec vous.':/rate limit|security purposes/i.test(r.error.message)?'Un e-mail vient déjà d\'être envoyé : attendez une minute avant de redemander.':r.error.message;a.err=true}
+      else{a.msg=`E-mail envoyé à ${email}. Ouvrez-le et cliquez sur le lien (regardez aussi dans les indésirables).`;a.err=false}render()})();return}
+  if(f.id==='share-form'){const s=view.share;const em=document.getElementById('share-email').value.trim().toLowerCase();if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){s.err='Adresse e-mail invalide.';renderShare();return}
+    s.err='';s.msg='';s.busy=true;renderShare();
+    (async()=>{try{if(s.direct){const {error}=await CLOUD.sb.from('book_shares').insert({book_id:s.book,email:em});if(error&&!/duplicate/i.test(error.message))throw error;s.list=[...(s.list||[]).filter(x=>x.email!==em),{email:em,status:'unknown'}];s.msg=`Livre partagé avec ${em}.`}
+      else{const r=await shareCall({action:'add',book_id:s.book,email:em});s.list=[...(s.list||[]).filter(x=>x.email!==em),r.share];s.msg=r.invited?`Invitation envoyée à ${em} : le lien reçu lui crée son compte et ouvre le livre.`:`Livre partagé avec ${em}${r.share.status==='active'?' (le livre est déjà dans sa liste)':''}.`}}
+      catch(e){s.err='Partage impossible : '+e.message}s.busy=false;renderShare()})();return}
   if(f.id==='acct-form'){const v=view.accounts;if(!v)return;const email=document.getElementById('ac-email').value.trim().toLowerCase(),password=document.getElementById('ac-pass').value.trim();v.draft={email,password};
     if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){v.err='Adresse e-mail invalide.';renderAccounts();return}if(password.length<8){v.err='Mot de passe de 8 caractères minimum.';renderAccounts();return}
     (async()=>{const r=await acctDo('create',null,{email,password});if(r&&r.user){view.accounts.shown={id:r.user.id,password};view.accounts.msg=`Compte créé pour <b>${esc(email)}</b>. Transmettez-lui son adresse et son mot de passe.`;view.accounts.draft={email:'',password:genPass()};renderAccounts()}})();return}
