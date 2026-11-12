@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
+<title>Réponses — enquête</title>
+<style>
+body{margin:0;background:#f6f3ee;color:#26221f;font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:20px}
+h1{font-size:20px;margin:0 0 12px}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+input{padding:8px 10px;border:1.5px solid #e6dfd6;border-radius:8px;font:inherit;min-width:260px}button,a.btn{padding:8px 12px;border-radius:8px;border:0;background:#b8584b;color:#fff;font:inherit;cursor:pointer;text-decoration:none}
+table{border-collapse:collapse;width:100%;background:#fff;font-size:13px}th,td{border-bottom:1px solid #e6dfd6;padding:6px 8px;text-align:left;vertical-align:top}th{position:sticky;top:0;background:#fffdf9}
+.muted{color:#7a7169}details{margin-top:6px}pre{white-space:pre-wrap;font-size:12px;background:#fffdf9;padding:8px;border-radius:8px}
+.tag{display:inline-block;padding:1px 7px;border-radius:10px;font-size:12px;background:#f6e3df}.tag.ok{background:#e3efe4}
+</style>
+</head>
+<body>
+<h1>Réponses à l'enquête</h1>
+<div class="row"><input id="k" type="password" placeholder="Clé d'accès (ENQUETE_ADMIN_KEY)"><button id="go">Charger</button><a id="csv" class="btn" hidden>Télécharger le CSV</a><span id="n" class="muted"></span></div>
+<div id="out"></div>
+<script>
+const $=s=>document.querySelector(s);const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const QS=Array.from({length:30},(_,i)=>'Q'+String(i+1).padStart(2,'0'));
+$('#k').value=localStorage.getItem('enq.admin')||'';
+$('#go').onclick=async()=>{const k=$('#k').value.trim();localStorage.setItem('enq.admin',k);$('#out').textContent='Chargement…';
+  const r=await fetch('/api/export?k='+encodeURIComponent(k));if(!r.ok){$('#out').textContent='Accès refusé.';return}
+  const j=await r.json();$('#n').textContent=j.count+' session(s)';$('#csv').hidden=false;$('#csv').href='/api/export?format=csv&k='+encodeURIComponent(k);
+  $('#out').innerHTML=`<table><thead><tr><th>Quand</th><th>Qui</th><th>État</th>${QS.map(q=>`<th>${q}</th>`).join('')}</tr></thead><tbody>${j.sessions.map(s=>`<tr><td class="muted">${esc((s.updated||'').slice(0,16).replace('T',' '))}</td><td>${esc(s.prenom)}<br><span class="muted">${esc(s.email)}</span></td><td><span class="tag ${s.done==='done'?'ok':''}">${s.done==='done'?'terminé':s.done==='stopped'?'arrêté':'en cours · '+esc(s.step)}</span></td>${QS.map(q=>`<td title="${esc(s.other?.[q]||'')}">${esc(s.answers?.[q]||'')}${s.other?.[q]?' <span class="muted">✎</span>':''}</td>`).join('')}</tr><tr><td colspan="33"><details><summary class="muted">Textes libres et transcription</summary><pre>${esc(Object.entries(s.other||{}).filter(([k,v])=>v).map(([k,v])=>k+' : '+v).join('\n')||'—')}\n\n${esc((s.log||[]).map(m=>(m.who==='bot'?'Noa : ':'— ')+m.text).join('\n'))}</pre></details></td></tr>`).join('')}</tbody></table>`};
+if($('#k').value)$('#go').click();
+</script>
+</body>
+</html>
