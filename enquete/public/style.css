@@ -1,41 +1,63 @@
 :root{
-  --bg:#f6f3ee;--paper:#fffdf9;--ink:#26221f;--muted:#7a7169;--line:#e6dfd6;
-  --bot:#ffffff;--me:#b8584b;--me-ink:#fff;--accent:#b8584b;--accent-soft:#f6e3df;--focus:#2f6f9f;
-  --radius:18px;--max:640px;
+  --cream:#f6f1e6;--paper:#fffaf0;--ink:#141311;--muted:#6f6a5e;--line:#e3dccc;
+  --green:#1d4a36;--green-ink:#f6f1e6;--lime:#d9f55c;--orange:#ee9550;--pink:#f3b9cf;--mint:#bfe8c9;--sky:#bcd9f2;
+  --radius:22px;--max:620px;
+  --display:"Unbounded","Arial Black","Helvetica Neue",Arial,sans-serif;
+  --body:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
 }
-@media (prefers-color-scheme:dark){:root{--bg:#1b1917;--paper:#221f1c;--ink:#f0ebe4;--muted:#a59c93;--line:#39342f;--bot:#2b2724;--me:#c96a5c;--accent:#d27c6e;--accent-soft:#3a2a27}}
+@media (prefers-color-scheme:dark){:root{--cream:#17201b;--paper:#1f2a23;--ink:#f3eee2;--muted:#a9b0a4;--line:#2e3a32;--green:#0f2a1e;--green-ink:#eef5e8}}
 *{box-sizing:border-box}
 html{height:100%}
-body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;display:flex;flex-direction:column;min-height:100dvh}
-.top{position:sticky;top:0;z-index:2;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);padding:12px 16px 0;max-width:var(--max);width:100%;margin:0 auto}
-.who{display:flex;align-items:center;gap:10px;padding-bottom:10px}
-.who b{display:block;font-size:15px}.who small{color:var(--muted);font-size:12.5px}
-.avatar{width:36px;height:36px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:700;font-size:15px}
-.progress{height:3px;background:var(--line);border-radius:3px;overflow:hidden}.progress i{display:block;height:100%;width:0;background:var(--accent);transition:width .5s ease}
-#chat{flex:1;max-width:var(--max);width:100%;margin:0 auto;padding:16px 16px 8px;display:flex;flex-direction:column;gap:10px}
-.msg{max-width:86%;padding:10px 14px;border-radius:var(--radius);white-space:pre-wrap;overflow-wrap:anywhere;animation:pop .22s ease-out}
-.msg.bot{align-self:flex-start;background:var(--bot);border-bottom-left-radius:6px;box-shadow:0 1px 2px rgba(0,0,0,.05)}
-.msg.me{align-self:flex-end;background:var(--me);color:var(--me-ink);border-bottom-right-radius:6px}
+body{margin:0;background:var(--cream);color:var(--ink);font:16px/1.45 var(--body);display:flex;flex-direction:column;min-height:100dvh}
+
+/* En-tête : marque + chapitre + progression */
+.top{position:sticky;top:0;z-index:2;background:color-mix(in srgb,var(--cream) 90%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);max-width:var(--max);width:100%;margin:0 auto;padding:14px 16px 10px}
+.who{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.brand{font-family:var(--display);font-weight:800;font-size:20px;letter-spacing:-.02em;text-transform:lowercase}
+.chip{display:inline-block;background:var(--pink);color:#141311;border-radius:999px;padding:6px 12px;font-size:12.5px;font-weight:600;white-space:nowrap;max-width:60%;overflow:hidden;text-overflow:ellipsis}
+.progress{height:6px;background:var(--line);border-radius:6px;overflow:hidden;margin-top:10px}.progress i{display:block;height:100%;width:0;background:var(--orange);border-radius:6px;transition:width .5s ease}
+
+/* Fil de conversation */
+#chat{flex:1;max-width:var(--max);width:100%;margin:0 auto;padding:12px 16px 8px;display:flex;flex-direction:column;gap:10px}
+.hero{font-family:var(--display);font-weight:800;font-size:clamp(40px,12vw,64px);line-height:.92;letter-spacing:-.03em;text-transform:uppercase;margin:6px 0 10px;animation:pop .3s ease-out}
+.hero em{font-style:normal;color:var(--orange)}
+.msg{max-width:88%;padding:12px 16px;border-radius:var(--radius);white-space:pre-wrap;overflow-wrap:anywhere;animation:pop .22s ease-out;font-size:16.5px}
+.msg.bot{align-self:flex-start;background:var(--green);color:var(--green-ink);border-bottom-left-radius:8px}
+.msg.me{align-self:flex-end;background:var(--lime);color:#141311;border-bottom-right-radius:8px;font-weight:500}
 .msg.sys{align-self:center;background:none;color:var(--muted);font-size:13px;padding:4px 10px}
-.typing{align-self:flex-start;background:var(--bot);border-radius:var(--radius);border-bottom-left-radius:6px;padding:12px 16px;display:flex;gap:5px;box-shadow:0 1px 2px rgba(0,0,0,.05)}
-.typing i{width:7px;height:7px;border-radius:50%;background:var(--muted);opacity:.5;animation:blink 1.2s infinite}.typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
+.typing{align-self:flex-start;background:var(--green);border-radius:var(--radius);border-bottom-left-radius:8px;padding:14px 18px;display:flex;gap:6px}
+.typing i{width:7px;height:7px;border-radius:50%;background:var(--lime);opacity:.5;animation:blink 1.2s infinite}.typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
 @keyframes blink{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-3px)}}
 @keyframes pop{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-.choices{display:flex;flex-direction:column;gap:6px;align-self:flex-start;max-width:86%;margin-top:-2px;animation:pop .25s ease-out}
-.choices button{text-align:left;background:var(--paper);border:1.5px solid var(--line);color:var(--ink);border-radius:14px;padding:9px 13px;font:inherit;font-size:15px;line-height:1.3;cursor:pointer;transition:border-color .15s,background .15s,transform .05s}
-.choices button:hover{border-color:var(--accent)}.choices button:active{transform:scale(.985)}
-.choices button[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent)}
-.choices button.go{align-self:flex-start;background:var(--accent);color:#fff;border-color:var(--accent);margin-top:4px}
-.choices button.go:disabled{opacity:.45;cursor:default}
-.choices button:focus-visible,.composer input:focus-visible,.composer button:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
-.composer{position:sticky;bottom:0;display:flex;gap:8px;align-items:center;max-width:var(--max);width:100%;margin:0 auto;padding:10px 16px calc(10px + env(safe-area-inset-bottom));background:var(--bg)}
-.composer input{flex:1;min-width:0;background:var(--paper);border:1.5px solid var(--line);border-radius:22px;padding:11px 16px;font:inherit;color:var(--ink)}
+
+/* Choix : pastilles colorées, en ligne quand elles sont courtes, empilées sinon */
+.choices{display:flex;flex-wrap:wrap;gap:8px;align-self:flex-start;max-width:92%;animation:pop .25s ease-out}
+.choices.stack{flex-direction:column;flex-wrap:nowrap}
+.choices button{text-align:left;background:var(--paper);border:2px solid transparent;color:#141311;border-radius:999px;padding:10px 16px;font:inherit;font-size:15px;font-weight:600;line-height:1.3;cursor:pointer;transition:transform .08s,filter .15s,background .15s}
+.choices.stack button{border-radius:18px}
+.choices button.c0{background:var(--lime)}.choices button.c1{background:var(--orange)}.choices button.c2{background:var(--mint)}.choices button.c3{background:var(--pink)}.choices button.c4{background:var(--sky)}.choices button.c5{background:var(--paper);border-color:var(--line)}
+.choices button:hover{filter:brightness(.96)}.choices button:active{transform:scale(.97)}
+.choices button[aria-pressed="true"]{background:var(--ink);color:var(--cream);border-color:var(--ink)}
+.choices button:disabled{opacity:.45;cursor:default}
+.choices button.go{background:var(--ink);color:var(--cream);width:100%;text-align:center;border-radius:999px;margin-top:2px}
+.choices button.go:disabled{opacity:.35}
+.choices button:focus-visible,.composer input:focus-visible,.composer button:focus-visible{outline:3px solid var(--orange);outline-offset:2px}
+
+/* Carte de fin (façon « Tonight's vibe ») */
+.card{align-self:stretch;background:var(--green);color:var(--green-ink);border-radius:26px;padding:22px 22px 20px;position:relative;overflow:hidden;animation:pop .3s ease-out}
+.card h2{font-family:var(--display);font-weight:800;font-size:34px;line-height:1;letter-spacing:-.02em;color:var(--lime);margin:0 0 8px;max-width:70%}
+.card p{margin:0;max-width:72%;font-size:15px;opacity:.92}
+.card .blob{position:absolute;right:-18px;bottom:-26px;width:120px;height:120px;border-radius:50%;background:var(--orange)}
+.card .blob::after{content:"";position:absolute;left:52px;top:0;width:60px;height:120px;border-radius:0 60px 60px 0;background:var(--pink);mix-blend-mode:multiply}
+
+/* Zone de saisie */
+.composer{position:sticky;bottom:0;display:flex;gap:8px;align-items:center;max-width:var(--max);width:100%;margin:0 auto;padding:10px 16px calc(12px + env(safe-area-inset-bottom));background:var(--cream)}
+.composer input{flex:1;min-width:0;background:var(--paper);border:2px solid var(--ink);border-radius:999px;padding:12px 18px;font:inherit;color:var(--ink)}
 .composer input::placeholder{color:var(--muted)}
-.composer .send{width:42px;height:42px;border-radius:50%;border:0;background:var(--accent);color:#fff;display:grid;place-items:center;cursor:pointer;flex:none}
+.composer .send{width:46px;height:46px;border-radius:50%;border:0;background:var(--lime);color:#141311;display:grid;place-items:center;cursor:pointer;flex:none}
 .composer .send:disabled{opacity:.35;cursor:default}
-.composer .skip{border:1.5px solid var(--line);background:var(--paper);color:var(--muted);border-radius:22px;padding:10px 14px;font:inherit;font-size:14px;cursor:pointer;flex:none}
-.composer .skip:hover{color:var(--ink);border-color:var(--accent)}
+.composer .skip{border:2px solid var(--line);background:var(--paper);color:var(--ink);border-radius:999px;padding:11px 14px;font:inherit;font-size:14px;font-weight:600;cursor:pointer;flex:none}
+.composer .skip:hover{border-color:var(--ink)}
 .composer.off input,.composer.off .send{visibility:hidden}
 .foot{max-width:var(--max);width:100%;margin:0 auto;padding:0 16px 14px;font-size:12px;color:var(--muted);text-align:center}
-@media (max-width:480px){.msg,.choices{max-width:92%}}
-@media (prefers-reduced-motion:reduce){.msg,.choices{animation:none}.typing i{animation:none;opacity:.6}}
+@media (prefers-reduced-motion:reduce){.msg,.choices,.hero,.card{animation:none}.typing i{animation:none;opacity:.6}}

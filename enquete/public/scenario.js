@@ -9,7 +9,7 @@ window.SCENARIO = (() => {
   const noPause = a => a.Q01 === 'A' && (a.Q16 === 'B' || a.Q16 === 'C');
 
   const chapters = {
-    1: 'Le déclic', 2: 'Comment ça s\'est passé', 3: 'Le moment de la pause', 4: 'Ce que tu aimerais'
+    1: 'Le déclic', 2: 'Comment ça s\'est passé', 3: 'Le moment de la pause', 4: 'Tes envies'
   };
 
   const nodes = [
@@ -108,7 +108,7 @@ window.SCENARIO = (() => {
     { id: 'Q30', chapter: 4, ask: "Pour créer un prochain livre photo, tu te sentirais le plus à l'aise avec…",
       choices: C(['A', 'Un outil simple où je fais tout moi-même'], ['B', 'Un outil qui me fait des propositions et me laisse modifier'], ['C', 'Un outil + une personne qui m\'aide à certaines étapes'], ['D', 'Une personne qui s\'occupe de presque tout, avec mon avis'], ['E', 'Je ne sais pas']), next: 'dernier' },
     { id: 'dernier', chapter: 4, ask: "Dernière chose, et c'est libre : une anecdote, une galère, une envie à propos des livres photo ? Sinon tu peux passer.", free: 'text', optional: true, next: 'fin' },
-    { id: 'fin', say: a => `Merci${a.prenom ? ' ' + a.prenom : ''}, c'est terminé ! Tes réponses vont m'aider à mieux comprendre ce qui rend la création d'un livre photo agréable, difficile… ou parfois interminable. Merci d'avoir pris le temps.`, end: true }
+    { id: 'fin', say: a => `C'est terminé ! Tes réponses vont m'aider à mieux comprendre ce qui rend la création d'un livre photo agréable, difficile… ou parfois interminable. Merci d'avoir pris le temps.`, end: true }
   ];
   const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
   return { nodes: byId, start: 'intro', chapters };

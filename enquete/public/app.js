@@ -58,10 +58,10 @@
     if (mode === 'free' && !replaying && matchMedia('(min-width: 700px)').matches) input.focus();
   }
   function showChoices(node, list) {
-    const box = document.createElement('div'); box.className = 'choices'; box.setAttribute('role', 'group');
+    const box = document.createElement('div'); box.className = 'choices' + (list.some(c => c.t.length > 22) ? ' stack' : ''); box.setAttribute('role', 'group');
     const picked = new Set();
-    list.forEach(c => {
-      const b = document.createElement('button'); b.type = 'button'; b.textContent = c.t; b.dataset.k = c.k;
+    list.forEach((c, i) => {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = c.t; b.dataset.k = c.k; b.className = 'c' + (i % 5);
       if (node.multi) {
         b.setAttribute('aria-pressed', 'false');
         b.onclick = () => {
@@ -86,10 +86,14 @@
   }
 
   // ---- moteur
+  function hero() { const h = document.createElement('h1'); h.className = 'hero'; h.innerHTML = 'Ton livre<br>photo,<br><em>raconte.</em>'; chat.appendChild(h); }
+  function endCard(text) { const c = document.createElement('div'); c.className = 'card'; c.innerHTML = '<h2></h2><p></p><span class="blob" aria-hidden="true"></span>'; c.querySelector('h2').textContent = 'Merci' + (st.prenom ? ' ' + st.prenom : '') + ' !'; c.querySelector('p').textContent = text; chat.appendChild(c); scroll(); }
   async function run(id) {
     const node = N[id]; if (!node) return finish();
+    if (id === S.start && !chat.children.length) hero();
     st.step = id; persist(); setProgress(node);
     if (node.say) {
+      if (node.end && id === 'fin') { const t = textOf(node, 'say'); if (!quick) { await wait(500); } endCard(t); st.log.push({ who: 'bot', text: t, t: Date.now() }); return finish(); }
       await botSay(textOf(node, 'say'));
       if (node.end) return finish();
       return run(typeof node.next === 'function' ? node.next(st.answers) : node.next);
@@ -193,13 +197,13 @@
     const begun = st.log.length && st.step && !['intro', 'intro2', 'start'].includes(st.step);
     if (begun) {
       replaying = true;
-      st.log.forEach(m => { if (m.who !== 'sys') bubble(m.who, m.text); });
+      hero(); st.log.forEach(m => { if (m.who !== 'sys') bubble(m.who, m.text); });
       replaying = false;
       if (st.done) {
         await botSay(`${st.prenom ? st.prenom + ', t' : 'T'}u as déjà répondu — merci ! Si tu veux refaire l'enquête, c'est ici.`);
         pending = { node: { id: 'again' }, kind: 'choice' };
         showChoices({ id: 'again' }, [{ k: 'R', t: 'Recommencer' }]);
-        pending.box.querySelector('button').onclick = () => { pending.box.remove(); st = Object.assign(fresh(), { prenom: st.prenom, email: st.email }); persist(); chat.innerHTML = ''; run('c1'); };
+        pending.box.querySelector('button').onclick = () => { pending.box.remove(); st = Object.assign(fresh(), { prenom: st.prenom, email: st.email }); persist(); chat.innerHTML = ''; hero(); run('c1'); };
         return;
       }
       await botSay(`Content de te revoir${st.prenom ? ' ' + st.prenom : ''} ! On reprend où on s'était arrêtés ?`);
