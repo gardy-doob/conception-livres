@@ -4,27 +4,63 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
 <title>Réponses — enquête</title>
 <style>
-body{margin:0;background:#f6f3ee;color:#26221f;font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:20px}
-h1{font-size:20px;margin:0 0 12px}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
-input{padding:8px 10px;border:1.5px solid #e6dfd6;border-radius:8px;font:inherit;min-width:260px}button,a.btn{padding:8px 12px;border-radius:8px;border:0;background:#b8584b;color:#fff;font:inherit;cursor:pointer;text-decoration:none}
-table{border-collapse:collapse;width:100%;background:#fff;font-size:13px}th,td{border-bottom:1px solid #e6dfd6;padding:6px 8px;text-align:left;vertical-align:top}th{position:sticky;top:0;background:#fffdf9}
-.muted{color:#7a7169}details{margin-top:6px}pre{white-space:pre-wrap;font-size:12px;background:#fffdf9;padding:8px;border-radius:8px}
-.tag{display:inline-block;padding:1px 7px;border-radius:10px;font-size:12px;background:#f6e3df}.tag.ok{background:#e3efe4}
+:root{--cream:#f6f1e6;--paper:#fffaf0;--ink:#141311;--muted:#6f6a5e;--line:#e3dccc;--green:#1d4a36;--lime:#d9f55c;--orange:#ee9550;--pink:#f3b9cf;--mint:#bfe8c9}
+*{box-sizing:border-box}
+body{margin:0;background:var(--cream);color:var(--ink);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:16px;max-width:720px;margin-inline:auto}
+h1{font-size:22px;margin:0 0 12px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+input{padding:10px 12px;border:2px solid var(--line);border-radius:999px;font:inherit;flex:1;min-width:180px;background:var(--paper)}
+button,a.btn{padding:10px 14px;border-radius:999px;border:0;background:var(--ink);color:var(--cream);font:inherit;font-weight:600;cursor:pointer;text-decoration:none;white-space:nowrap}
+a.btn{background:var(--lime);color:var(--ink)}
+.muted{color:var(--muted)}
+.stats{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}.stat{background:var(--paper);border:1.5px solid var(--line);border-radius:14px;padding:8px 12px;font-size:13px}.stat b{font-size:18px;display:block}
+.card{background:var(--paper);border-radius:18px;padding:14px;margin-bottom:12px;border:1.5px solid var(--line)}
+.head{display:flex;justify-content:space-between;gap:8px;align-items:flex-start;flex-wrap:wrap}
+.head b{font-size:17px}.head small{display:block;color:var(--muted);overflow-wrap:anywhere}
+.tag{display:inline-block;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;background:var(--pink)}.tag.ok{background:var(--mint)}.tag.stop{background:var(--orange)}
+.qa{margin:12px 0 0;padding:0;list-style:none;display:grid;gap:8px}
+.qa li{border-top:1px solid var(--line);padding-top:8px}
+.qa .q{font-size:12.5px;color:var(--muted)}.qa .q span{font-weight:700;color:var(--ink);margin-right:6px}
+.qa .a{font-weight:600;margin-top:2px}.qa .free{margin-top:3px;padding:8px 10px;background:var(--lime);border-radius:12px;font-weight:500;white-space:pre-wrap;overflow-wrap:anywhere}
+.qa .free small{display:block;color:#3b4a1e;font-weight:600;font-size:11px;margin-bottom:2px}
+details{margin-top:12px}summary{cursor:pointer;color:var(--muted);font-size:13px}
+.chat{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.chat .m{max-width:88%;padding:8px 12px;border-radius:14px;font-size:14px;white-space:pre-wrap;overflow-wrap:anywhere}
+.chat .bot{align-self:flex-start;background:var(--green);color:var(--cream);border-bottom-left-radius:5px}
+.chat .me{align-self:flex-end;background:var(--lime);border-bottom-right-radius:5px}
+.err{background:#fde5e0;padding:10px 12px;border-radius:12px}
 </style>
 </head>
 <body>
 <h1>Réponses à l'enquête</h1>
-<div class="row"><input id="k" type="password" placeholder="Clé d'accès (ENQUETE_ADMIN_KEY)"><button id="go">Charger</button><a id="csv" class="btn" hidden>Télécharger le CSV</a><span id="n" class="muted"></span></div>
+<form class="row" id="f"><input id="k" type="password" placeholder="Clé d'accès" autocomplete="current-password"><button type="submit">Charger</button><a id="csv" class="btn" hidden>CSV</a></form>
+<div class="stats" id="stats"></div>
 <div id="out"></div>
+<script src="scenario.js"></script>
 <script>
 const $=s=>document.querySelector(s);const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const QS=Array.from({length:30},(_,i)=>'Q'+String(i+1).padStart(2,'0'));
+const N=window.SCENARIO.nodes;const ORDER=Object.keys(N).filter(k=>N[k].ask&&!['start'].includes(k));
+const txt=(v,a)=>typeof v==='function'?v(a):v;
+const when=s=>{const d=new Date(s.updated||s.started);return isNaN(d)?'':d.toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})};
+function answers(s){const a=s.answers||{},o=s.other||{};const out=[];
+  for(const id of ORDER){const n=N[id];const has=id in a||(o[id]!==undefined&&o[id]!=='');if(!has)continue;
+    const q=txt(n.ask,a);const list=txt(n.choices,a)||[];let label='';
+    if(n.free){label=id==='prenom'?s.prenom:id==='email'?s.email:'';}
+    else{const ks=String(a[id]||'').split(',');label=ks.map(k=>k==='-'?'(passé)':k==='?'?'(réponse libre)':(list.find(c=>c.k===k)||{}).t||k).join(' · ');}
+    out.push({id,q,label,free:n.free?(id==='prenom'||id==='email'?'':o[id]):o[id]});}
+  return out;}
 $('#k').value=localStorage.getItem('enq.admin')||'';
-$('#go').onclick=async()=>{const k=$('#k').value.trim();localStorage.setItem('enq.admin',k);$('#out').textContent='Chargement…';
-  const r=await fetch('/api/export?k='+encodeURIComponent(k));if(!r.ok){$('#out').textContent='Accès refusé.';return}
-  const j=await r.json();$('#n').textContent=j.count+' session(s)';$('#csv').hidden=false;$('#csv').href='/api/export?format=csv&k='+encodeURIComponent(k);
-  $('#out').innerHTML=`<table><thead><tr><th>Quand</th><th>Qui</th><th>État</th>${QS.map(q=>`<th>${q}</th>`).join('')}</tr></thead><tbody>${j.sessions.map(s=>`<tr><td class="muted">${esc((s.updated||'').slice(0,16).replace('T',' '))}</td><td>${esc(s.prenom)}<br><span class="muted">${esc(s.email)}</span></td><td><span class="tag ${s.done==='done'?'ok':''}">${s.done==='done'?'terminé':s.done==='stopped'?'arrêté':'en cours · '+esc(s.step)}</span></td>${QS.map(q=>`<td title="${esc(s.other?.[q]||'')}">${esc(s.answers?.[q]||'')}${s.other?.[q]?' <span class="muted">✎</span>':''}</td>`).join('')}</tr><tr><td colspan="33"><details><summary class="muted">Textes libres et transcription</summary><pre>${esc(Object.entries(s.other||{}).filter(([k,v])=>v).map(([k,v])=>k+' : '+v).join('\n')||'—')}\n\n${esc((s.log||[]).map(m=>(m.who==='bot'?'Noa : ':'— ')+m.text).join('\n'))}</pre></details></td></tr>`).join('')}</tbody></table>`};
-if($('#k').value)$('#go').click();
+$('#f').onsubmit=async e=>{e.preventDefault();const k=$('#k').value.trim();localStorage.setItem('enq.admin',k);$('#out').innerHTML='<p class="muted">Chargement…</p>';
+  const r=await fetch('/api/export?k='+encodeURIComponent(k));if(!r.ok){$('#out').innerHTML='<p class="err">Accès refusé : vérifie la clé.</p>';return}
+  const j=await r.json();$('#csv').hidden=false;$('#csv').href='/api/export?format=csv&k='+encodeURIComponent(k);
+  const done=j.sessions.filter(s=>s.done==='done').length,stop=j.sessions.filter(s=>s.done==='stopped').length;
+  $('#stats').innerHTML=`<div class="stat"><b>${j.count}</b>sessions</div><div class="stat"><b>${done}</b>terminées</div><div class="stat"><b>${j.count-done-stop}</b>en cours</div><div class="stat"><b>${stop}</b>arrêtées</div>`;
+  $('#out').innerHTML=j.sessions.map(s=>{const st=s.done==='done'?'<span class="tag ok">terminé</span>':s.done==='stopped'?'<span class="tag stop">arrêté</span>':`<span class="tag">en cours · ${esc(s.step)}</span>`;
+    const qa=answers(s).filter(x=>x.id!=='prenom'&&x.id!=='email');
+    return `<section class="card"><div class="head"><div><b>${esc(s.prenom||'Anonyme')}</b><small>${esc(s.email||'')}</small><small>${esc(when(s))}</small></div>${st}</div>
+      <ul class="qa">${qa.map(x=>`<li><div class="q"><span>${esc(x.id)}</span>${esc(x.q)}</div>${x.label?`<div class="a">${esc(x.label)}</div>`:''}${x.free?`<div class="free"><small>${x.label&&x.label!=='(réponse libre)'?'précision':'avec ses mots'}</small>${esc(x.free)}</div>`:''}</li>`).join('')||'<li class="muted">Aucune réponse encore.</li>'}</ul>
+      <details><summary>Transcription complète (${(s.log||[]).length} messages)</summary><div class="chat">${(s.log||[]).map(m=>`<div class="m ${m.who==='bot'?'bot':'me'}">${esc(m.text)}</div>`).join('')}</div></details></section>`}).join('')};
+if($('#k').value)$('#f').requestSubmit();
 </script>
 </body>
 </html>
